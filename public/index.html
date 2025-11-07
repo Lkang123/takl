@@ -758,6 +758,81 @@
       let currentRoomId = null; // 当前房间ID
       let isRoomOwner = false; // 是否为房主
 
+      // 连接重连状态
+      let reconnectTimer = null;
+      let reconnectAttempts = 0;
+      let lastActivityAt = Date.now();
+
+      function isWsOpen() {
+        return ws && ws.readyState === WebSocket.OPEN;
+      }
+
+      function setStatus(text) {
+        statusEl.style.display = 'flex';
+        statusEl.textContent = text;
+      }
+
+      function clearReconnectTimer(){
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+        }
+      }
+
+      function scheduleReconnect(immediate = false) {
+        if (!currentRoomId) return; // 未加入房间无需重连
+        if (isWsOpen()) return; // 已连接
+        if (reconnectTimer) return; // 已有定时器
+        const base = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
+        const delay = immediate ? 0 : base;
+        setStatus('重连中…');
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null;
+          reconnectAttempts++;
+          connectToRoom(currentRoomId);
+        }, delay);
+      }
+
+      function onConnected(){
+        reconnectAttempts = 0;
+        clearReconnectTimer();
+        setStatus('已连接');
+        if (sendBtn) sendBtn.disabled = false;
+      }
+
+      // 前后台切换 & 网络变化：恢复时尝试重连
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          if (!isWsOpen()) scheduleReconnect(true);
+        }
+      });
+      window.addEventListener('pageshow', () => {
+        if (!isWsOpen()) scheduleReconnect(true);
+      });
+      window.addEventListener('online', () => scheduleReconnect(true));
+      // 记录最近活动
+      const markActivity = () => (lastActivityAt = Date.now());
+
+      // 离线发送队列
+      // 结构：{ roomId: string, payload: { type, text, name } }
+      let sendQueue = [];
+      function flushQueue(){
+        if (!isWsOpen() || sendQueue.length === 0) return;
+        const pending = sendQueue.splice(0);
+        const remain = [];
+        let sent = 0;
+        for (const item of pending) {
+          if (item.roomId !== currentRoomId) { remain.push(item); continue; }
+          try { ws.send(JSON.stringify(item.payload)); sent++; }
+          catch (e) { // 发送失败，把当前以及剩余的塞回队列并退出
+            remain.push(item, ...pending.slice(pending.indexOf(item)+1));
+            break;
+          }
+        }
+        if (remain.length) sendQueue = remain.concat(sendQueue);
+        if (sent > 0) addLine(`已发送排队的${sent}条消息`, 'system');
+      }
+
       // 生成随机房间密码
       function generateRoomPassword() {
         const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -957,37 +1032,42 @@
         ws = new WebSocket(`${proto}://${location.host}/?${qs}`);
 
         ws.onopen = () => {
-          statusEl.style.display = 'flex';
-          statusEl.textContent = '已连接';
+          onConnected();
           store.setItem('currentRoom', roomId);
           authDiv.style.display = 'none';
           chatDiv.style.display = 'flex';
 
           // 更新标题显示房间信息
           document.querySelector('header .subtitle').textContent = `房间: ${roomId}`;
+          // 重连成功后，尝试发送排队消息
+          flushQueue();
         };
 
         ws.onclose = (e) => {
-          statusEl.style.display = 'none';
           if (e.code === 1008) {
             authStatusEl.textContent = '房间连接失败，请检查密码';
             authStatusEl.style.color = '#ff3b30';
             store.removeItem('currentRoom');
             authDiv.style.display = 'flex';
             chatDiv.style.display = 'none';
+            if (sendBtn) sendBtn.disabled = true;
           } else if (e.code === 1000 && e.reason === 'Room dissolved by owner') {
             // 房间被解散，已在 roomDissolved 消息中处理
             // 这里不需要额外操作，避免重复
+          } else {
+            // 其他情况：自动重连
+            scheduleReconnect(false);
           }
         };
 
         ws.onerror = () => {
-          statusEl.style.display = 'none';
-          authStatusEl.textContent = '连接失败';
-          authStatusEl.style.color = '#ff3b30';
+          authStatusEl.textContent = '连接异常，正在重连…';
+          authStatusEl.style.color = '#8e8e93';
+          scheduleReconnect(false);
         };
 
         ws.onmessage = async (e) => {
+          markActivity();
           try {
             const m = JSON.parse(e.data);
             if (m.type === 'error') {
@@ -1002,6 +1082,10 @@
               return;
             }
             if (m.type === 'history') {
+              // 已有内容时跳过历史，避免重连后重复渲染
+              if (messages.childElementCount > 0) {
+                return;
+              }
               // 加载历史消息
               if (m.messages && m.messages.length > 0) {
                 addLine('--- 历史消息 ---', 'system');
@@ -1160,7 +1244,21 @@
 
       async function sendMessage(){
         const text = input.value.trim();
-        if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+        if (!text) return;
+        if (!isWsOpen()) {
+          // 离线：将消息加密后加入待发送队列，并尝试重连
+          const ciphertext = await encryptMessage(text);
+          const payload = { type: 'text', text: ciphertext, name: nameEl.value.trim() || undefined };
+          sendQueue.push({ roomId: currentRoomId, payload });
+          addLine(`离线，已加入待发送队列（${sendQueue.length}）`, 'system');
+          input.value = '';
+          if (document.activeElement !== input) {
+            input.focus({ preventScroll: true });
+          }
+          scheduleReconnect(true);
+          setTimeout(scrollToBottom, 50);
+          return;
+        }
         const ciphertext = await encryptMessage(text);
         const payload = { type: 'text', text: ciphertext, name: nameEl.value.trim() || undefined };
         ws.send(JSON.stringify(payload));
