@@ -308,16 +308,17 @@
         -webkit-overflow-scrolling: touch;
       }
 
-      /* 系统消息 */
+      /* 系统消息 - 缩小占比 */
       #messages .system {
         align-self: center;
         color: #8e8e93;
-        font-size: 13px;
+        font-size: 11px;
         text-align: center;
-        padding: 6px 12px;
-        background: rgba(142, 142, 147, 0.08);
-        border-radius: 12px;
-        max-width: 80%;
+        padding: 3px 8px;
+        background: rgba(142, 142, 147, 0.05);
+        border-radius: 8px;
+        max-width: 70%;
+        margin: 2px 0;
       }
 
       /* 消息气泡容器 */
@@ -550,6 +551,10 @@
 
         store.setItem('clientId', clientId);
       }
+
+      // 系统消息去重：记录最近的系统消息和时间戳
+      const recentSystemMessages = new Map(); // key: 消息文本, value: 时间戳
+      const SYSTEM_MSG_DEDUPE_WINDOW = 10000; // 10秒内相同消息去重
       function hash(s){ let h=0; for(let i=0;i<s.length;i++){ h=(h*31 + s.charCodeAt(i))>>>0; } return h; }
       function nicknameFromId(id){
         const adjs=['可爱','机智','勇敢','敏捷','快乐','低调','闪亮','冷静','热情','顽皮','优雅','靠谱','淡定','灵巧','稳重','阳光'];
@@ -835,6 +840,27 @@
       }
 
       function addLine(text, cls) {
+        // 系统消息去重逻辑
+        if (cls === 'system') {
+          const now = Date.now();
+          const lastTime = recentSystemMessages.get(text);
+
+          // 如果10秒内出现过相同消息，跳过
+          if (lastTime && (now - lastTime) < SYSTEM_MSG_DEDUPE_WINDOW) {
+            return;
+          }
+
+          // 记录本次消息时间
+          recentSystemMessages.set(text, now);
+
+          // 清理过期记录（超过去重窗口的消息）
+          for (const [msg, time] of recentSystemMessages.entries()) {
+            if (now - time > SYSTEM_MSG_DEDUPE_WINDOW) {
+              recentSystemMessages.delete(msg);
+            }
+          }
+        }
+
         const div = document.createElement('div');
         if (cls) div.className = cls;
         div.textContent = text;
@@ -846,19 +872,20 @@
         const msgDiv = document.createElement('div');
         msgDiv.className = 'msg ' + (isMe ? 'right' : 'left');
 
+        // 昵称放在气泡外面
+        if (!isMe) {
+          const nameSpan = document.createElement('div');
+          nameSpan.className = 'name';
+          nameSpan.textContent = who;
+          msgDiv.appendChild(nameSpan);
+        }
+
         const bubble = document.createElement('div');
         bubble.className = 'bubble';
 
         // 如果不是自己的消息，应用用户专属颜色
         if (!isMe && color) {
           bubble.style.backgroundColor = color;
-        }
-
-        if (!isMe) {
-          const nameSpan = document.createElement('div');
-          nameSpan.className = 'name';
-          nameSpan.textContent = who;
-          bubble.appendChild(nameSpan);
         }
 
         const textSpan = document.createElement('div');
