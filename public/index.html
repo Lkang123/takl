@@ -3,6 +3,12 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0a84ff" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="悄悄话" />
+
     <title>悄悄话</title>
     <style>
       * {
@@ -97,7 +103,7 @@
       /* 认证界面 */
       #auth {
         flex: 1 1 auto;
-        display: flex;
+        display: none; /* 初始隐藏，避免刷新时闪现 */
         flex-direction: column;
         justify-content: center;
         align-items: center;
@@ -107,7 +113,7 @@
 
       #auth .lock-icon {
         font-size: 48px;
-        margin-bottom: 24px;
+        margin-bottom: 16px;
         opacity: 0.8;
       }
 
@@ -116,7 +122,23 @@
         max-width: 320px;
         display: flex;
         flex-direction: column;
-        gap: 16px;
+        gap: 12px;
+      }
+
+      #auth .title {
+        font-size: 22px;
+        font-weight: 600;
+        color: #000;
+        text-align: center;
+        margin-bottom: 8px;
+      }
+
+      #auth .description {
+        font-size: 14px;
+        color: #8e8e93;
+        text-align: center;
+        margin-bottom: 16px;
+        line-height: 1.4;
       }
 
       #auth label {
@@ -163,12 +185,50 @@
         transform: scale(0.98);
       }
 
+      #auth button.secondary {
+        background: #f2f2f7;
+        color: #007aff;
+        margin-top: 12px;
+      }
+
+      #auth .divider {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin: 20px 0;
+        color: #8e8e93;
+        font-size: 14px;
+      }
+
+      #auth .divider::before,
+      #auth .divider::after {
+        content: '';
+        flex: 1;
+        height: 0.5px;
+        background: rgba(60, 60, 67, 0.12);
+      }
+
       #auth .status-text {
         margin-top: 12px;
         font-size: 14px;
         color: #ff3b30;
         text-align: center;
         min-height: 20px;
+      }
+
+      #auth .room-info {
+        margin-top: 16px;
+        padding: 12px 16px;
+        background: #f2f2f7;
+        border-radius: 12px;
+        font-size: 14px;
+        color: #8e8e93;
+        text-align: center;
+      }
+
+      #auth .room-info strong {
+        color: #000;
+        font-weight: 600;
       }
 
       /* 聊天主界面容器 */
@@ -211,6 +271,27 @@
 
       .name-bar input:focus {
         box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.2);
+      }
+
+      .name-bar button {
+        padding: 8px 14px;
+        border: none;
+        border-radius: 8px;
+        background: #007aff;
+        color: #fff;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: opacity 0.2s;
+        white-space: nowrap;
+      }
+
+      .name-bar button:hover {
+        opacity: 0.9;
+      }
+
+      .name-bar button:active {
+        opacity: 0.7;
       }
 
       /* 消息滚动区域 */
@@ -288,8 +369,8 @@
       }
 
       #messages .msg.left .bubble {
-        background: #e9e9eb;
-        color: #000;
+        /* 背景色将由 JavaScript 动态设置 */
+        color: #fff;
         border-bottom-left-radius: 4px;
       }
 
@@ -394,13 +475,22 @@
       </header>
 
       <!-- 认证界面 -->
-      <div id="auth" style="display:none;">
+      <div id="auth">
         <div class="lock-icon">🔐</div>
         <div class="row">
-          <label>房间密码</label>
-          <input id="password" type="password" placeholder="请输入房间密码" autocomplete="off" />
-          <button id="joinBtn">进入悄悄话</button>
+          <div class="title">欢迎来到悄悄话</div>
+          <div class="description">创建新房间或加入已有房间开始聊天</div>
+
+          <button id="createRoomBtn">创建新房间</button>
+
+          <div class="divider">或</div>
+
+          <label>加入已有房间</label>
+          <input id="roomPassword" type="text" placeholder="输入房间密码" autocomplete="off" />
+          <button id="joinRoomBtn" class="secondary">加入房间</button>
+
           <div class="status-text" id="authStatus"></div>
+          <div class="room-info" id="roomInfo" style="display:none;"></div>
         </div>
       </div>
 
@@ -409,6 +499,7 @@
         <div class="name-bar">
           <label>昵称</label>
           <input id="name" type="text" placeholder="你的昵称" autocomplete="off" />
+          <button id="inviteBtn">邀请</button>
         </div>
         <div id="messages"></div>
         <form id="form">
@@ -435,9 +526,11 @@
 
       const authDiv = document.getElementById('auth');
       const chatDiv = document.getElementById('chat');
-      const passwordEl = document.getElementById('password');
-      const joinBtn = document.getElementById('joinBtn');
+      const roomPasswordEl = document.getElementById('roomPassword');
+      const createRoomBtn = document.getElementById('createRoomBtn');
+      const joinRoomBtn = document.getElementById('joinRoomBtn');
       const authStatusEl = document.getElementById('authStatus');
+      const roomInfoEl = document.getElementById('roomInfo');
       const messages = document.getElementById('messages');
       const form = document.getElementById('form');
       const input = document.getElementById('input');
@@ -471,6 +564,61 @@
 
       let ws = null;
       let encryptionKey = null; // 加密密钥
+      let currentRoomId = null; // 当前房间ID
+
+      // 生成随机房间密码
+      function generateRoomPassword() {
+        const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+        let password = '';
+        for (let i = 0; i < 8; i++) {
+          password += chars[Math.floor(Math.random() * chars.length)];
+        }
+        return password;
+      }
+
+      // 从 URL 获取房间参数
+      function getRoomFromURL() {
+        const params = new URLSearchParams(window.location.search);
+        return params.get('room');
+      }
+
+      // 生成邀请链接
+      function getInviteLink(roomId) {
+        const url = new URL(window.location.origin + window.location.pathname);
+        url.searchParams.set('room', roomId);
+        return url.toString();
+      }
+
+      // 归一化房间ID：如果用户粘贴的是完整链接，提取其中的 room 参数
+      function normalizeRoomId(input) {
+        if (!input) return input;
+        try {
+          const u = new URL(input);
+          const r = u.searchParams.get('room');
+          return r || input;
+        } catch (_) {
+          return input;
+        }
+      }
+
+      // 复制到剪贴板
+      async function copyToClipboard(text) {
+        try {
+          await navigator.clipboard.writeText(text);
+          return true;
+        } catch (e) {
+          // 降级方案
+          const textarea = document.createElement('textarea');
+          textarea.value = text;
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          document.body.appendChild(textarea);
+          textarea.select();
+          const success = document.execCommand('copy');
+          document.body.removeChild(textarea);
+          return success;
+        }
+      }
 
       // 从密码派生加密密钥
       async function deriveKey(password) {
@@ -529,56 +677,110 @@
         }
       }
 
-      const savedPassword = store.getItem('roomPassword');
-      if (savedPassword) {
-        connectWithPassword(savedPassword);
+      // 检查 URL 参数或本地存储
+      const urlRoom = getRoomFromURL();
+      const savedRoom = store.getItem('currentRoom');
+
+      if (savedRoom) {
+        // 优先自动重连上次的房间（刷新页面保持在线）
+        // 不显示认证页面，避免闪烁；仅在 header 显示连接状态
+        statusEl.style.display = 'flex';
+        statusEl.textContent = '正在连接…';
+        connectToRoom(savedRoom);
+      } else if (urlRoom) {
+        // 通过邀请链接访问，自动加入该房间
+        roomPasswordEl.value = urlRoom;
+        statusEl.style.display = 'flex';
+        statusEl.textContent = '正在连接…';
+        connectToRoom(urlRoom);
       } else {
-        authDiv.style.display = 'block';
+        // 首次访问，显示认证界面
+        authDiv.style.display = 'flex';
       }
 
-      joinBtn.addEventListener('click', () => {
-        const password = passwordEl.value.trim();
-        if (!password) {
-          authStatusEl.textContent = '请输入密码';
-          authStatusEl.style.color = 'red';
+      // 创建新房间
+      createRoomBtn.addEventListener('click', () => {
+        const roomId = generateRoomPassword();
+        const inviteLink = getInviteLink(roomId);
+
+        roomInfoEl.innerHTML = `
+          <strong>房间已创建！</strong><br>
+          房间密码：<strong>${roomId}</strong><br>
+          <span style="font-size:12px;">点击下方按钮复制邀请链接分享给朋友</span>
+        `;
+        roomInfoEl.style.display = 'block';
+
+        // 添加复制按钮
+        const copyBtn = document.createElement('button');
+        copyBtn.textContent = '复制邀请链接';
+        copyBtn.style.marginTop = '12px';
+        copyBtn.onclick = async () => {
+          const success = await copyToClipboard(inviteLink);
+          if (success) {
+            copyBtn.textContent = '已复制！';
+            setTimeout(() => {
+              copyBtn.textContent = '复制邀请链接';
+            }, 2000);
+          }
+        };
+        roomInfoEl.appendChild(copyBtn);
+
+        // 自动连接到新房间
+        setTimeout(() => {
+          connectToRoom(roomId);
+        }, 1500);
+      });
+
+      // 加入房间
+      joinRoomBtn.addEventListener('click', () => {
+        const roomId = normalizeRoomId(roomPasswordEl.value.trim());
+        if (!roomId) {
+          authStatusEl.textContent = '请输入房间密码';
+          authStatusEl.style.color = '#ff3b30';
           return;
         }
-        connectWithPassword(password);
+        connectToRoom(roomId);
       });
 
-      passwordEl.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') joinBtn.click();
+      roomPasswordEl.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') joinRoomBtn.click();
       });
 
-      async function connectWithPassword(password) {
+      async function connectToRoom(roomId) {
         authStatusEl.textContent = '正在生成加密密钥…';
-        authStatusEl.style.color = '#666';
+        authStatusEl.style.color = '#8e8e93';
 
-        // 派生加密密钥
-        encryptionKey = await deriveKey(password);
+        // 派生加密密钥（使用房间密码）
+        encryptionKey = await deriveKey(roomId);
+        currentRoomId = roomId;
 
-        authStatusEl.textContent = '正在连接…';
+        authStatusEl.textContent = '正在连接房间…';
 
         const proto = location.protocol === 'https:' ? 'wss' : 'ws';
         const qs = new URLSearchParams({
           id: clientId,
           name: nameEl.value || '',
-          password: password
+          room: roomId
         }).toString();
         ws = new WebSocket(`${proto}://${location.host}/?${qs}`);
 
         ws.onopen = () => {
           statusEl.style.display = 'flex';
-          store.setItem('roomPassword', password);
+          statusEl.textContent = '已连接';
+          store.setItem('currentRoom', roomId);
           authDiv.style.display = 'none';
           chatDiv.style.display = 'flex';
+
+          // 更新标题显示房间信息
+          document.querySelector('header .subtitle').textContent = `房间: ${roomId}`;
         };
 
         ws.onclose = (e) => {
           statusEl.style.display = 'none';
           if (e.code === 1008) {
-            authStatusEl.textContent = '密码错误，请重试';
-            store.removeItem('roomPassword');
+            authStatusEl.textContent = '房间连接失败，请检查密码';
+            authStatusEl.style.color = '#ff3b30';
+            store.removeItem('currentRoom');
             authDiv.style.display = 'flex';
             chatDiv.style.display = 'none';
           }
@@ -587,6 +789,7 @@
         ws.onerror = () => {
           statusEl.style.display = 'none';
           authStatusEl.textContent = '连接失败';
+          authStatusEl.style.color = '#ff3b30';
         };
 
         ws.onmessage = async (e) => {
@@ -594,7 +797,8 @@
             const m = JSON.parse(e.data);
             if (m.type === 'error') {
               authStatusEl.textContent = m.text;
-              store.removeItem('roomPassword');
+              authStatusEl.style.color = '#ff3b30';
+              store.removeItem('currentRoom');
               return;
             }
             if (m.type === 'userCount') {
@@ -610,7 +814,7 @@
                   const who = msg.name ? msg.name : `#${msg.from}`;
                   const isMe = msg.from === clientId;
                   const plaintext = await decryptMessage(msg.text);
-                  addMessage(who, plaintext, isMe);
+                  addMessage(who, plaintext, isMe, msg.color);
                 }
                 addLine('--- 以上是历史消息 ---', 'system');
               }
@@ -622,7 +826,7 @@
               const isMe = m.from === clientId;
               // 解密消息
               const plaintext = await decryptMessage(m.text);
-              return addMessage(who, plaintext, isMe);
+              return addMessage(who, plaintext, isMe, m.color);
             }
           } catch (_) {
             addLine(String(e.data));
@@ -638,12 +842,17 @@
         messages.scrollTop = messages.scrollHeight;
       }
 
-      function addMessage(who, text, isMe) {
+      function addMessage(who, text, isMe, color) {
         const msgDiv = document.createElement('div');
         msgDiv.className = 'msg ' + (isMe ? 'right' : 'left');
 
         const bubble = document.createElement('div');
         bubble.className = 'bubble';
+
+        // 如果不是自己的消息，应用用户专属颜色
+        if (!isMe && color) {
+          bubble.style.backgroundColor = color;
+        }
 
         if (!isMe) {
           const nameSpan = document.createElement('div');
@@ -660,6 +869,30 @@
         messages.appendChild(msgDiv);
         messages.scrollTop = messages.scrollHeight;
       }
+
+      // 邀请按钮
+
+      // 注册 Service Worker（PWA 安装支持）
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(() => {});
+        });
+      }
+
+      const inviteBtn = document.getElementById('inviteBtn');
+      inviteBtn.addEventListener('click', async () => {
+        if (!currentRoomId) return;
+        const inviteLink = getInviteLink(currentRoomId);
+        const success = await copyToClipboard(inviteLink);
+        if (success) {
+          inviteBtn.textContent = '已复制';
+          setTimeout(() => {
+            inviteBtn.textContent = '邀请';
+          }, 2000);
+        } else {
+          alert('复制失败，邀请链接：\n' + inviteLink);
+        }
+      });
 
       form.addEventListener('submit', async (e) => {
         e.preventDefault();

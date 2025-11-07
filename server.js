@@ -8,7 +8,6 @@ const WebSocket = require('ws');
 
 const PORT = process.env.PORT || 3000;
 const HOST = '0.0.0.0'; // listen on all interfaces for LAN access
-const ROOM_PASSWORD = process.env.ROOM_PASSWORD || 'chat123'; // 房间密码，可通过环境变量修改
 
 // Resolve and restrict static file serving to the public directory
 const publicDir = path.join(__dirname, 'public');
@@ -18,6 +17,7 @@ const MIME = {
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
@@ -52,63 +52,118 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocket.Server({ server });
 let nextId = 0;
 
-// 消息历史记录（内存存储，最多保留100条）
-const messageHistory = [];
+// 多房间管理：{ roomId: { clients: Set, history: [] } }
+const rooms = new Map();
 const MAX_HISTORY = 100;
 
-function broadcast(data, exclude) {
+// 获取或创建房间
+function getRoom(roomId) {
+  if (!rooms.has(roomId)) {
+    rooms.set(roomId, {
+      clients: new Set(),
+      history: []
+    });
+  }
+  return rooms.get(roomId);
+}
+
+// 向指定房间广播消息
+function broadcastToRoom(roomId, data, exclude) {
+  const room = rooms.get(roomId);
+  if (!room) return;
+
   const out = typeof data === 'string' ? data : JSON.stringify(data);
-  for (const client of wss.clients) {
+  for (const client of room.clients) {
     if (client.readyState === WebSocket.OPEN && client !== exclude) {
       client.send(out);
     }
   }
 }
 
-// 广播在线人数
-function broadcastUserCount() {
-  const count = Array.from(wss.clients).filter(c => c.readyState === WebSocket.OPEN).length;
-  broadcast({ type: 'userCount', count }, null);
+// 广播房间在线人数
+function broadcastRoomUserCount(roomId) {
+  const room = rooms.get(roomId);
+  if (!room) return;
+
+  const count = Array.from(room.clients).filter(c => c.readyState === WebSocket.OPEN).length;
+  broadcastToRoom(roomId, { type: 'userCount', count }, null);
 }
 
-// 添加消息到历史记录
-function addToHistory(message) {
-  messageHistory.push(message);
-  if (messageHistory.length > MAX_HISTORY) {
-    messageHistory.shift(); // 移除最旧的消息
+// 添加消息到房间历史记录
+function addToRoomHistory(roomId, message) {
+  const room = getRoom(roomId);
+  room.history.push(message);
+  if (room.history.length > MAX_HISTORY) {
+    room.history.shift(); // 移除最旧的消息
   }
 }
 
+// 根据用户 ID 生成专属颜色
+function getUserColor(userId) {
+  const colors = [
+    '#FF6B6B', // 珊瑚红
+    '#4ECDC4', // 青绿色
+    '#45B7D1', // 天蓝色
+    '#FFA07A', // 浅橙色
+    '#98D8C8', // 薄荷绿
+    '#F7DC6F', // 柠檬黄
+    '#BB8FCE', // 淡紫色
+    '#85C1E2', // 浅蓝色
+    '#F8B88B', // 桃色
+    '#52B788', // 森林绿
+    '#FF8FAB', // 粉红色
+    '#6C5CE7', // 靛蓝色
+    '#FDA7DF', // 粉紫色
+    '#A8DADC', // 粉蓝色
+    '#E9C46A', // 金黄色
+    '#F4A261', // 橙色
+  ];
+
+  // 使用简单的哈希函数将用户 ID 映射到颜色
+  let hash = 0;
+  for (let i = 0; i < userId.length; i++) {
+    hash = ((hash << 5) - hash) + userId.charCodeAt(i);
+    hash = hash & hash; // Convert to 32bit integer
+  }
+
+  return colors[Math.abs(hash) % colors.length];
+}
+
 wss.on('connection', (ws, req) => {
-  // parse query params for persistent identity and password
-  let u, qid, qname, qpass;
+  // parse query params for persistent identity, name, and room
+  let u, qid, qname, qroom;
   try {
     u = new URL(req.url, 'http://localhost');
     qid = u.searchParams.get('id');
     qname = u.searchParams.get('name');
-    qpass = u.searchParams.get('password');
+    qroom = u.searchParams.get('room');
   } catch {
     qid = null;
     qname = null;
-    qpass = null;
+    qroom = null;
   }
 
-  // 验证房间密码
-  if (qpass !== ROOM_PASSWORD) {
-    ws.send(JSON.stringify({ type: 'error', text: '房间密码错误，连接已拒绝' }));
-    ws.close(1008, 'Invalid password'); // 1008 = Policy Violation
+  // 房间密码即房间ID（如果没有提供，拒绝连接）
+  if (!qroom || !qroom.trim()) {
+    ws.send(JSON.stringify({ type: 'error', text: '未提供房间密码，连接已拒绝' }));
+    ws.close(1008, 'No room specified'); // 1008 = Policy Violation
     return;
   }
 
   ws.id = qid && qid.trim() ? qid.trim() : String(++nextId);
   ws.name = qname && qname.trim() ? qname.trim() : undefined;
+  ws.roomId = qroom.trim(); // 保存用户所在房间
 
   ws.isAlive = true;
   ws.on('pong', () => (ws.isAlive = true));
 
+  // 将用户加入房间
+  const room = getRoom(ws.roomId);
+  room.clients.add(ws);
+
   // 发送历史消息给新连接的用户
-  if (messageHistory.length > 0) {
-    ws.send(JSON.stringify({ type: 'history', messages: messageHistory }));
+  if (room.history.length > 0) {
+    ws.send(JSON.stringify({ type: 'history', messages: room.history }));
   }
 
   // 欢迎与加入通知（中文）
@@ -116,10 +171,10 @@ wss.on('connection', (ws, req) => {
   ws.send(
     JSON.stringify({ type: 'system', text: `欢迎，${display}（ID: ${ws.id}）`, at: Date.now() })
   );
-  broadcast({ type: 'system', text: `${display} 加入了`, at: Date.now() }, null);
+  broadcastToRoom(ws.roomId, { type: 'system', text: `${display} 加入了`, at: Date.now() }, null);
 
   // 广播更新后的在线人数
-  broadcastUserCount();
+  broadcastRoomUserCount(ws.roomId);
 
   ws.on('message', (buf) => {
     let payload;
@@ -136,160 +191,40 @@ wss.on('connection', (ws, req) => {
       from: ws.id,
       at: Date.now(),
       type: 'message',
+      color: getUserColor(ws.id), // 添加用户专属颜色
     };
     // 日志：服务器看到的消息（应该是加密的）
-    console.log(`[服务器收到] ${message.name || message.from}: ${message.text.substring(0, 50)}...`);
+    console.log(`[房间 ${ws.roomId}] ${message.name || message.from}: ${message.text.substring(0, 50)}...`);
 
-    // 添加到历史记录
-    addToHistory(message);
+    // 添加到房间历史记录
+    addToRoomHistory(ws.roomId, message);
 
-    broadcast(message);
+    // 广播到同一房间
+    broadcastToRoom(ws.roomId, message);
   });
 
   // Override broken/previous close handler with a clean CN message
   ws.removeAllListeners('close');
   ws.on('close', () => {
     const display = ws.name || ws.id;
-    broadcast({ type: 'system', text: `${display} 离开了`, at: Date.now() }, null);
 
-    // 广播更新后的在线人数
-    broadcastUserCount();
-  });
+    // 从房间移除用户
+    const room = rooms.get(ws.roomId);
+    if (room) {
+      room.clients.delete(ws);
 
+      // 广播离开消息
+      broadcastToRoom(ws.roomId, { type: 'system', text: `${display} 离开了`, at: Date.now() }, null);
 
-  if (false) ws.on('close', () => {
-    const display = ws.name || ws.id;
-    broadcast({ type: 'system', text: `${display} 
+      // 广播更新后的在线人数
+      broadcastRoomUserCount(ws.roomId);
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
- left`, at: Date.now() }, null);
+      // 如果房间空了，可以选择删除房间（可选）
+      if (room.clients.size === 0) {
+        console.log(`[房间 ${ws.roomId}] 已清空，保留历史记录`);
+        // rooms.delete(ws.roomId); // 取消注释以删除空房间
+      }
+    }
   });
 
   ws.on('error', () => {});
@@ -320,7 +255,7 @@ function getLanAddresses() {
 server.listen(PORT, HOST, () => {
   const addrs = getLanAddresses();
   console.log(`Server listening on http://${HOST}:${PORT}`);
-  console.log(`房间密码: ${ROOM_PASSWORD}`);
+  console.log(`多房间模式已启用 - 用户可以创建和加入不同的房间`);
   if (addrs.length) {
     console.log('LAN addresses:');
     for (const ip of addrs) console.log(`  -> http://${ip}:${PORT}`);
