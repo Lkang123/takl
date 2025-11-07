@@ -655,8 +655,8 @@
         </div>
         <div id="messages"></div>
         <form id="form">
-          <input id="input" type="text" placeholder="iMessage" autocomplete="off" />
-          <button type="submit">发送</button>
+          <input id="input" type="text" placeholder="iMessage" autocomplete="off" enterkeyhint="send" autocapitalize="off" autocorrect="off" spellcheck="false" />
+          <button type="button" id="sendBtn">发送</button>
         </form>
       </div>
     </div>
@@ -689,6 +689,17 @@
       const nameEl = document.getElementById('name');
       const statusEl = document.getElementById('status');
       const userCountEl = document.getElementById('userCount');
+      const sendBtn = document.getElementById('sendBtn');
+
+      // 避免点击“发送”按钮时让输入框失焦（导致键盘闪一下）
+      if (sendBtn) {
+        const keepFocus = (e) => {
+          e.preventDefault(); // 阻止按钮获取焦点
+          input.focus({ preventScroll: true });
+        };
+        sendBtn.addEventListener('mousedown', keepFocus, { passive: false });
+        sendBtn.addEventListener('touchstart', keepFocus, { passive: false });
+      }
 
       const store = window.localStorage;
       let clientId = store.getItem('clientId');
@@ -1141,19 +1152,28 @@
         });
       }
 
-      form.addEventListener('submit', async (e) => {
-        e.preventDefault();
+      async function sendMessage(){
         const text = input.value.trim();
-        if (!text) return;
-        // 加密消息
+        if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
         const ciphertext = await encryptMessage(text);
         const payload = { type: 'text', text: ciphertext, name: nameEl.value.trim() || undefined };
         ws.send(JSON.stringify(payload));
         input.value = '';
-        // 保持输入框焦点，防止键盘收起
-        input.focus();
-        // 发送后立即滚动到底部
+        // 保持输入聚焦（仅当确实失焦时）
+        if (document.activeElement !== input) {
+          input.focus({ preventScroll: true });
+        }
         setTimeout(scrollToBottom, 50);
+      }
+
+      // 禁用表单默认提交，改为手动发送
+      form.addEventListener('submit', (e) => e.preventDefault());
+      if (sendBtn) sendBtn.addEventListener('click', () => { sendMessage(); });
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          sendMessage();
+        }
       });
     </script>
   </body>
