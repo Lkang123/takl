@@ -691,14 +691,20 @@
       const userCountEl = document.getElementById('userCount');
       const sendBtn = document.getElementById('sendBtn');
 
-      // 避免点击“发送”按钮时让输入框失焦（导致键盘闪一下）
+      // 避免点击“发送”按钮时让输入框失焦，同时在触摸设备直接发送
       if (sendBtn) {
-        const keepFocus = (e) => {
-          e.preventDefault(); // 阻止按钮获取焦点
+        // 桌面端：按下时保持输入框焦点，点击时发送
+        sendBtn.addEventListener('mousedown', (e) => {
+          e.preventDefault();
           input.focus({ preventScroll: true });
-        };
-        sendBtn.addEventListener('mousedown', keepFocus, { passive: false });
-        sendBtn.addEventListener('touchstart', keepFocus, { passive: false });
+        }, { passive: false });
+        // 移动端：触摸开始即发送，避免 click 被阻断且保持键盘
+        sendBtn.addEventListener('touchstart', (e) => {
+          e.preventDefault();
+          input.focus({ preventScroll: true });
+          // 直接发送
+          if (typeof sendMessage === 'function') sendMessage();
+        }, { passive: false });
       }
 
       const store = window.localStorage;
