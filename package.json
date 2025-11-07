@@ -1,0 +1,18 @@
+{
+  "name": "whisper-chat",
+  "version": "1.0.0",
+  "description": "端到端加密聊天应用",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": ["chat", "e2e-encryption", "websocket"],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}
