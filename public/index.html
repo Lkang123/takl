@@ -500,6 +500,7 @@
         <div class="name-bar">
           <label>昵称</label>
           <input id="name" type="text" placeholder="你的昵称" autocomplete="off" />
+          <button id="dissolveBtn" style="display:none; background:#ff3b30;">解散房间</button>
           <button id="inviteBtn">邀请</button>
         </div>
         <div id="messages"></div>
@@ -557,9 +558,10 @@
       const SYSTEM_MSG_DEDUPE_WINDOW = 10000; // 10秒内相同消息去重
       function hash(s){ let h=0; for(let i=0;i<s.length;i++){ h=(h*31 + s.charCodeAt(i))>>>0; } return h; }
       function nicknameFromId(id){
-        const adjs=['可爱','机智','勇敢','敏捷','快乐','低调','闪亮','冷静','热情','顽皮','优雅','靠谱','淡定','灵巧','稳重','阳光'];
-        const animals=['狐狸','熊猫','海豚','小鹿','蜗牛','麒麟','猫咪','鲸鱼','猎豹','云雀','天鹅','麋鹿','企鹅','玄狐','飞马','长颈鹿'];
-        const h=hash(id); return adjs[h%adjs.length] + animals[(h>>>8)%animals.length] + String(h%100).padStart(2,'0');
+        const prefixes = ['在逃', '退役', '资深', '见习', '实习', '临时', '兼职', '全职', '首席', '御用', '专业', '业余', '神秘', '隐藏', '传说中的', '迷路的', '熬夜', '摸鱼', '划水', '潜水'];
+        const roles = ['公主', '打工人', '社畜', '网瘾少年', '熬夜冠军', '干饭人', '吃瓜群众', '键盘侠', '话痨', '社恐', '肥宅', '咸鱼', '工具人', '柠檬精', '杠精', '卷王', '躺平大师', '摆烂专家', '追星族', '夜猫子'];
+        const h = hash(id);
+        return prefixes[h % prefixes.length] + roles[(h >>> 8) % roles.length] + String(h % 100).padStart(2, '0');
       }
       if (!store.getItem('name')) {
         store.setItem('name', nicknameFromId(clientId));
@@ -570,6 +572,7 @@
       let ws = null;
       let encryptionKey = null; // 加密密钥
       let currentRoomId = null; // 当前房间ID
+      let isRoomOwner = false; // 是否为房主
 
       // 生成随机房间密码
       function generateRoomPassword() {
@@ -825,7 +828,26 @@
               }
               return;
             }
-            if (m.type === 'system') return addLine(`【系统】${m.text}`, 'system');
+            if (m.type === 'system') {
+              // 检查是否为房主
+              if (m.isOwner !== undefined) {
+                isRoomOwner = m.isOwner;
+                const dissolveBtn = document.getElementById('dissolveBtn');
+                if (isRoomOwner) {
+                  dissolveBtn.style.display = 'block';
+                }
+              }
+              return addLine(`【系统】${m.text}`, 'system');
+            }
+            if (m.type === 'roomDissolved') {
+              // 房间被解散
+              addLine(`【系统】${m.text}`, 'system');
+              setTimeout(() => {
+                store.removeItem('currentRoom');
+                location.reload();
+              }, 2000);
+              return;
+            }
             if (m.type === 'message') {
               const who = m.name ? m.name : `#${m.from}`;
               const isMe = m.from === clientId;
@@ -898,14 +920,6 @@
       }
 
       // 邀请按钮
-
-      // 注册 Service Worker（PWA 安装支持）
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js').catch(() => {});
-        });
-      }
-
       const inviteBtn = document.getElementById('inviteBtn');
       inviteBtn.addEventListener('click', async () => {
         if (!currentRoomId) return;
@@ -920,6 +934,23 @@
           alert('复制失败，邀请链接：\n' + inviteLink);
         }
       });
+
+      // 解散房间按钮
+      const dissolveBtn = document.getElementById('dissolveBtn');
+      dissolveBtn.addEventListener('click', () => {
+        if (!isRoomOwner) return;
+
+        if (confirm('确定要解散房间吗？所有成员将被移除，聊天记录将被清空。')) {
+          ws.send(JSON.stringify({ type: 'dissolveRoom' }));
+        }
+      });
+
+      // 注册 Service Worker（PWA 安装支持）
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(() => {});
+        });
+      }
 
       form.addEventListener('submit', async (e) => {
         e.preventDefault();

@@ -57,11 +57,12 @@ const rooms = new Map();
 const MAX_HISTORY = 100;
 
 // 获取或创建房间
-function getRoom(roomId) {
+function getRoom(roomId, ownerId = null) {
   if (!rooms.has(roomId)) {
     rooms.set(roomId, {
       clients: new Set(),
-      history: []
+      history: [],
+      owner: ownerId // 记录房主ID
     });
   }
   return rooms.get(roomId);
@@ -157,8 +158,9 @@ wss.on('connection', (ws, req) => {
   ws.isAlive = true;
   ws.on('pong', () => (ws.isAlive = true));
 
-  // 将用户加入房间
-  const room = getRoom(ws.roomId);
+  // 将用户加入房间（如果是新房间，设置为房主）
+  const room = getRoom(ws.roomId, ws.id);
+  const isOwner = room.owner === ws.id;
   room.clients.add(ws);
 
   // 发送历史消息给新连接的用户
@@ -169,7 +171,12 @@ wss.on('connection', (ws, req) => {
   // 欢迎与加入通知（中文）
   const display = ws.name || ws.id;
   ws.send(
-    JSON.stringify({ type: 'system', text: `欢迎，${display}（ID: ${ws.id}）`, at: Date.now() })
+    JSON.stringify({
+      type: 'system',
+      text: `欢迎，${display}（ID: ${ws.id}）`,
+      at: Date.now(),
+      isOwner: isOwner // 告诉客户端是否为房主
+    })
   );
   broadcastToRoom(ws.roomId, { type: 'system', text: `${display} 加入了`, at: Date.now() }, null);
 
@@ -182,6 +189,38 @@ wss.on('connection', (ws, req) => {
       payload = JSON.parse(buf.toString());
     } catch (_) {
       payload = { text: buf.toString() }; // keep it simple, server decides final type
+    }
+
+    // 处理解散房间请求
+    if (payload.type === 'dissolveRoom') {
+      const room = rooms.get(ws.roomId);
+      if (!room) {
+        ws.send(JSON.stringify({ type: 'error', text: '房间不存在' }));
+        return;
+      }
+
+      // 验证是否为房主
+      if (room.owner !== ws.id) {
+        ws.send(JSON.stringify({ type: 'error', text: '只有房主可以解散房间' }));
+        return;
+      }
+
+      // 通知所有成员房间已解散
+      broadcastToRoom(ws.roomId, {
+        type: 'roomDissolved',
+        text: '房主已解散房间',
+        at: Date.now()
+      }, null);
+
+      // 关闭所有连接并删除房间
+      for (const client of room.clients) {
+        if (client.readyState === WebSocket.OPEN) {
+          client.close(1000, 'Room dissolved by owner');
+        }
+      }
+      rooms.delete(ws.roomId);
+      console.log(`[房间 ${ws.roomId}] 已被房主解散`);
+      return;
     }
 
     // Normalize and ensure server-controlled fields override payload
