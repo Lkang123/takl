@@ -70,6 +70,12 @@
         font-weight: 400;
       }
 
+      header .right-section {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
       header .status-indicator {
         display: flex;
         align-items: center;
@@ -93,6 +99,123 @@
         50% { opacity: 0.5; }
       }
 
+      header .dissolve-btn {
+        padding: 6px 12px;
+        border: none;
+        border-radius: 6px;
+        background: #ff3b30;
+        color: #fff;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: opacity 0.2s;
+        white-space: nowrap;
+      }
+
+      header .dissolve-btn:hover {
+        opacity: 0.9;
+      }
+
+      header .dissolve-btn:active {
+        opacity: 0.7;
+      }
+
+      /* 模态框遮罩 */
+      .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.4);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+        animation: fadeIn 0.2s ease-out;
+      }
+
+      .modal-overlay.show {
+        display: flex;
+      }
+
+      @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+
+      /* 模态框内容 */
+      .modal {
+        background: #fff;
+        border-radius: 14px;
+        width: 90%;
+        max-width: 320px;
+        overflow: hidden;
+        animation: slideUp 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+      }
+
+      @keyframes slideUp {
+        from {
+          opacity: 0;
+          transform: translateY(20px) scale(0.95);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0) scale(1);
+        }
+      }
+
+      .modal-header {
+        padding: 20px 16px 12px;
+        text-align: center;
+      }
+
+      .modal-title {
+        font-size: 17px;
+        font-weight: 600;
+        color: #000;
+        margin-bottom: 8px;
+      }
+
+      .modal-message {
+        font-size: 13px;
+        color: #8e8e93;
+        line-height: 1.4;
+      }
+
+      .modal-actions {
+        border-top: 0.5px solid rgba(60, 60, 67, 0.12);
+        display: flex;
+      }
+
+      .modal-btn {
+        flex: 1;
+        padding: 14px;
+        border: none;
+        background: transparent;
+        font-size: 17px;
+        font-weight: 400;
+        cursor: pointer;
+        transition: background 0.2s;
+      }
+
+      .modal-btn:active {
+        background: rgba(0, 0, 0, 0.05);
+      }
+
+      .modal-btn + .modal-btn {
+        border-left: 0.5px solid rgba(60, 60, 67, 0.12);
+      }
+
+      .modal-btn.cancel {
+        color: #007aff;
+      }
+
+      .modal-btn.danger {
+        color: #ff3b30;
+        font-weight: 600;
+      }
+
       /* 在线人数 */
       header .user-count {
         font-size: 13px;
@@ -105,16 +228,25 @@
         flex: 1 1 auto;
         display: none; /* 初始隐藏，避免刷新时闪现 */
         flex-direction: column;
-        justify-content: center;
         align-items: center;
         padding: 32px 20px;
         background: #fff;
+        overflow-y: auto;
+        overflow-x: hidden;
+        -webkit-overflow-scrolling: touch; /* iOS 平滑滚动 */
       }
 
-      #auth .lock-icon {
+      #auth .content-wrapper {
+        width: 100%;
+        max-width: 320px;
+        margin: auto 0; /* 垂直居中，但允许滚动 */
+      }
+
+      #auth .content-wrapper .lock-icon {
         font-size: 48px;
         margin-bottom: 16px;
         opacity: 0.8;
+        text-align: center;
       }
 
       #auth .row {
@@ -472,26 +604,45 @@
           <h1>悄悄话 <span class="user-count" id="userCount"></span></h1>
           <div class="subtitle">🔒 端到端加密请放心说</div>
         </div>
-        <div class="status-indicator" id="status" style="display:none;">已连接</div>
+        <div class="right-section">
+          <button id="dissolveBtn" class="dissolve-btn" style="display:none;">解散房间</button>
+          <div class="status-indicator" id="status" style="display:none;">已连接</div>
+        </div>
       </header>
+
+      <!-- 解散房间确认模态框 -->
+      <div class="modal-overlay" id="dissolveModal">
+        <div class="modal">
+          <div class="modal-header">
+            <div class="modal-title">解散房间</div>
+            <div class="modal-message">确定要解散房间吗？所有成员将被移除，聊天记录将被清空。</div>
+          </div>
+          <div class="modal-actions">
+            <button class="modal-btn cancel" id="modalCancel">取消</button>
+            <button class="modal-btn danger" id="modalConfirm">解散</button>
+          </div>
+        </div>
+      </div>
 
       <!-- 认证界面 -->
       <div id="auth">
-        <div class="lock-icon">🔐</div>
-        <div class="row">
-          <div class="title">欢迎来到悄悄话</div>
-          <div class="description">创建新房间或加入已有房间开始聊天</div>
+        <div class="content-wrapper">
+          <div class="lock-icon">🔐</div>
+          <div class="row">
+            <div class="title">欢迎来到悄悄话</div>
+            <div class="description">创建新房间或加入已有房间开始聊天</div>
 
-          <button id="createRoomBtn">创建新房间</button>
+            <button id="createRoomBtn">创建新房间</button>
 
-          <div class="divider">或</div>
+            <div class="divider">或</div>
 
-          <label>加入已有房间</label>
-          <input id="roomPassword" type="text" placeholder="输入房间密码" autocomplete="off" />
-          <button id="joinRoomBtn" class="secondary">加入房间</button>
+            <label>加入已有房间</label>
+            <input id="roomPassword" type="text" placeholder="输入房间密码" autocomplete="off" />
+            <button id="joinRoomBtn" class="secondary">加入房间</button>
 
-          <div class="status-text" id="authStatus"></div>
-          <div class="room-info" id="roomInfo" style="display:none;"></div>
+            <div class="status-text" id="authStatus"></div>
+            <div class="room-info" id="roomInfo" style="display:none;"></div>
+          </div>
         </div>
       </div>
 
@@ -500,7 +651,6 @@
         <div class="name-bar">
           <label>昵称</label>
           <input id="name" type="text" placeholder="你的昵称" autocomplete="off" />
-          <button id="dissolveBtn" style="display:none; background:#ff3b30;">解散房间</button>
           <button id="inviteBtn">邀请</button>
         </div>
         <div id="messages"></div>
@@ -544,13 +694,30 @@
       let clientId = store.getItem('clientId');
       if (!clientId) {
         clientId = (Math.random().toString(36).slice(2, 10) + Date.now().toString(36)).slice(0, 12);
-
-	      // 输入框获得焦点时，自动滚到最底部（配合移动端软键盘）
-	      input.addEventListener('focus', () => {
-	        setTimeout(() => { messages.scrollTop = messages.scrollHeight; }, 0);
-	      });
-
         store.setItem('clientId', clientId);
+      }
+
+      // 滚动到底部的辅助函数
+      function scrollToBottom() {
+        messages.scrollTop = messages.scrollHeight;
+      }
+
+      // 输入框获得焦点时，自动滚到最底部（配合移动端软键盘）
+      input.addEventListener('focus', () => {
+        // 多次尝试滚动，因为键盘弹出有延迟
+        setTimeout(scrollToBottom, 100);
+        setTimeout(scrollToBottom, 300);
+        setTimeout(scrollToBottom, 500);
+      });
+
+      // 监听 visualViewport 变化（键盘弹出/收起）
+      if (window.visualViewport) {
+        visualViewport.addEventListener('resize', () => {
+          // 如果输入框有焦点，滚动到底部
+          if (document.activeElement === input) {
+            setTimeout(scrollToBottom, 100);
+          }
+        });
       }
 
       // 系统消息去重：记录最近的系统消息和时间戳
@@ -791,6 +958,9 @@
             store.removeItem('currentRoom');
             authDiv.style.display = 'flex';
             chatDiv.style.display = 'none';
+          } else if (e.code === 1000 && e.reason === 'Room dissolved by owner') {
+            // 房间被解散，已在 roomDissolved 消息中处理
+            // 这里不需要额外操作，避免重复
           }
         };
 
@@ -840,10 +1010,12 @@
               return addLine(`【系统】${m.text}`, 'system');
             }
             if (m.type === 'roomDissolved') {
-              // 房间被解散
+              // 房间被解散 - 立即清除本地存储和 URL 参数
+              store.removeItem('currentRoom');
               addLine(`【系统】${m.text}`, 'system');
               setTimeout(() => {
-                store.removeItem('currentRoom');
+                // 清除 URL 参数后重新加载
+                window.history.replaceState({}, '', window.location.pathname);
                 location.reload();
               }, 2000);
               return;
@@ -887,7 +1059,7 @@
         if (cls) div.className = cls;
         div.textContent = text;
         messages.appendChild(div);
-        messages.scrollTop = messages.scrollHeight;
+        scrollToBottom();
       }
 
       function addMessage(who, text, isMe, color) {
@@ -916,7 +1088,7 @@
 
         msgDiv.appendChild(bubble);
         messages.appendChild(msgDiv);
-        messages.scrollTop = messages.scrollHeight;
+        scrollToBottom();
       }
 
       // 邀请按钮
@@ -935,13 +1107,30 @@
         }
       });
 
-      // 解散房间按钮
+      // 解散房间按钮与模态框
       const dissolveBtn = document.getElementById('dissolveBtn');
+      const dissolveModal = document.getElementById('dissolveModal');
+      const modalCancel = document.getElementById('modalCancel');
+      const modalConfirm = document.getElementById('modalConfirm');
+
       dissolveBtn.addEventListener('click', () => {
         if (!isRoomOwner) return;
+        dissolveModal.classList.add('show');
+      });
 
-        if (confirm('确定要解散房间吗？所有成员将被移除，聊天记录将被清空。')) {
-          ws.send(JSON.stringify({ type: 'dissolveRoom' }));
+      modalCancel.addEventListener('click', () => {
+        dissolveModal.classList.remove('show');
+      });
+
+      modalConfirm.addEventListener('click', () => {
+        dissolveModal.classList.remove('show');
+        ws.send(JSON.stringify({ type: 'dissolveRoom' }));
+      });
+
+      // 点击遮罩层关闭模态框
+      dissolveModal.addEventListener('click', (e) => {
+        if (e.target === dissolveModal) {
+          dissolveModal.classList.remove('show');
         }
       });
 
@@ -961,6 +1150,8 @@
         const payload = { type: 'text', text: ciphertext, name: nameEl.value.trim() || undefined };
         ws.send(JSON.stringify(payload));
         input.value = '';
+        // 发送后立即滚动到底部
+        setTimeout(scrollToBottom, 50);
       });
     </script>
   </body>

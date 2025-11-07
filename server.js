@@ -52,8 +52,9 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocket.Server({ server });
 let nextId = 0;
 
-// 多房间管理：{ roomId: { clients: Set, history: [] } }
+// 多房间管理：{ roomId: { clients: Set, history: [], owner: string } }
 const rooms = new Map();
+const dissolvedRooms = new Set(); // 记录已解散的房间ID，防止重新加入
 const MAX_HISTORY = 100;
 
 // 获取或创建房间
@@ -151,6 +152,13 @@ wss.on('connection', (ws, req) => {
     return;
   }
 
+  // 检查房间是否已被解散
+  if (dissolvedRooms.has(qroom.trim())) {
+    ws.send(JSON.stringify({ type: 'error', text: '该房间已被解散，无法加入' }));
+    ws.close(1008, 'Room dissolved');
+    return;
+  }
+
   ws.id = qid && qid.trim() ? qid.trim() : String(++nextId);
   ws.name = qname && qname.trim() ? qname.trim() : undefined;
   ws.roomId = qroom.trim(); // 保存用户所在房间
@@ -212,6 +220,9 @@ wss.on('connection', (ws, req) => {
         at: Date.now()
       }, null);
 
+      // 标记房间为已解散（防止重新加入）
+      dissolvedRooms.add(ws.roomId);
+
       // 关闭所有连接并删除房间
       for (const client of room.clients) {
         if (client.readyState === WebSocket.OPEN) {
@@ -219,7 +230,7 @@ wss.on('connection', (ws, req) => {
         }
       }
       rooms.delete(ws.roomId);
-      console.log(`[房间 ${ws.roomId}] 已被房主解散`);
+      console.log(`[房间 ${ws.roomId}] 已被房主解散并加入黑名单`);
       return;
     }
 
