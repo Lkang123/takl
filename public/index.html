@@ -1150,6 +1150,8 @@
         const payload = { type: 'text', text: ciphertext, name: nameEl.value.trim() || undefined };
         ws.send(JSON.stringify(payload));
         input.value = '';
+        // 保持输入框焦点，防止键盘收起
+        input.focus();
         // 发送后立即滚动到底部
         setTimeout(scrollToBottom, 50);
       });
