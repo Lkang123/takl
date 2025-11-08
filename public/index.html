@@ -552,6 +552,51 @@
         border-top: 0.5px solid rgba(60, 60, 67, 0.12);
       }
 
+      /* 回复横条 */
+      .reply-bar {
+        flex: 0 0 auto;
+        display: none;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 8px 16px;
+        background: #fff;
+        border-top: 0.5px solid rgba(60, 60, 67, 0.12);
+        font-size: 13px;
+        color: #8e8e93;
+      }
+      .reply-bar .title { color: #3c3c43; font-weight: 500; }
+      .reply-bar .preview { color: #8e8e93; }
+      .reply-bar .close { border: none; background: transparent; color: #007aff; font-weight: 600; cursor: pointer; }
+
+      /* 引用块 */
+      .quote {
+        font-size: 12px;
+        color: #8e8e93;
+        padding: 4px 8px;
+        margin-bottom: 6px;
+        background: rgba(0,0,0,0.04);
+        border-radius: 8px;
+      }
+
+      /* 反应条 */
+      .reactions {
+        margin-top: 6px;
+        display: inline-flex;
+        gap: 4px;
+        flex-wrap: wrap;
+      }
+      .reaction-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 6px;
+        font-size: 12px;
+        border-radius: 999px;
+        background: rgba(0,0,0,0.06);
+        color: #3c3c43;
+      }
+
       #input {
         flex: 1 1 auto;
         min-height: 36px;
@@ -682,6 +727,15 @@
         </div>
         <div id="roster" class="roster-bar"></div>
         <div id="messages"></div>
+        <div id="replyBar" class="reply-bar">
+          <div>
+            <span class="title">回复</span>
+            <span id="replyWho" class="preview"></span>
+            <span>：</span>
+            <span id="replyPreview" class="preview"></span>
+          </div>
+          <button id="replyCancel" class="close">取消</button>
+        </div>
         <form id="form">
           <input id="input" type="text" placeholder="iMessage" autocomplete="off" enterkeyhint="send" autocapitalize="off" autocorrect="off" spellcheck="false" />
           <button type="button" id="sendBtn">发送</button>
@@ -713,6 +767,10 @@
       const roomInfoEl = document.getElementById('roomInfo');
       const messages = document.getElementById('messages');
       const rosterEl = document.getElementById('roster');
+      const replyBar = document.getElementById('replyBar');
+      const replyWhoEl = document.getElementById('replyWho');
+      const replyPreviewEl = document.getElementById('replyPreview');
+      const replyCancelBtn = document.getElementById('replyCancel');
       const form = document.getElementById('form');
       const input = document.getElementById('input');
       const nameEl = document.getElementById('name');
@@ -805,6 +863,13 @@
       let encryptionKey = null; // 加密密钥
       let currentRoomId = null; // 当前房间ID
       let isRoomOwner = false; // 是否为房主
+      // 消息索引：用于回复预览
+      const messageTextById = new Map();
+      const messageAuthorById = new Map();
+      // 反应：messageId -> emoji -> Set(userId)
+      const reactions = new Map();
+      // 当前回复目标
+      let currentReplyTo = null;
 
       // 连接重连状态
       let reconnectTimer = null;
@@ -1176,13 +1241,7 @@
               if (m.messages && m.messages.length > 0) {
                 addLine('--- 历史消息 ---', 'system');
                 for (const msg of m.messages) {
-                  if ((msg.proto && msg.proto !== PROTO_VERSION) || (msg.kdf && (msg.kdf.iter !== KDF_ITER || msg.kdf.saltVer !== KDF_SALT_VER))) {
-                    addLine('【系统】历史消息包含不同版本/参数，若显示解密失败，请刷新或使用同版本链接', 'system');
-                  }
-                  const who = msg.name ? msg.name : `#${msg.from}`;
-                  const isMe = msg.from === clientId;
-                  const plaintext = await decryptMessage(msg.text);
-                  addMessage(who, plaintext, isMe, msg.color, msg.id); // 🔧 传入消息ID
+                  await handleIncomingMessage(msg);
                 }
                 addLine('--- 以上是历史消息 ---', 'system');
               }
@@ -1214,15 +1273,7 @@
               return;
             }
             if (m.type === 'message') {
-              // 版本与 KDF 协商提示
-              if ((m.proto && m.proto !== PROTO_VERSION) || (m.kdf && (m.kdf.iter !== KDF_ITER || m.kdf.saltVer !== KDF_SALT_VER))) {
-                addLine('【系统】检测到不同版本/参数的消息，若无法正常解密，请刷新页面或使用同版本链接', 'system');
-              }
-              const who = m.name ? m.name : `#${m.from}`;
-              const isMe = m.from === clientId;
-              // 解密消息
-              const plaintext = await decryptMessage(m.text);
-              return addMessage(who, plaintext, isMe, m.color, m.id); // 🔧 传入消息ID
+              return await handleIncomingMessage(m);
             }
           } catch (_) {
             addLine(String(e.data));
@@ -1305,7 +1356,7 @@
         }
       }
 
-      function addMessage(who, text, isMe, color, messageId) {
+      function addMessage(who, text, isMe, color, messageId, opts) {
         // 🔧 消息去重：如果提供了消息ID且已显示过，则跳过
         if (messageId) {
           if (displayedMessageIds.has(messageId)) {
@@ -1325,6 +1376,17 @@
 
         const msgDiv = document.createElement('div');
         msgDiv.className = 'msg ' + (isMe ? 'right' : 'left');
+        if (messageId) msgDiv.setAttribute('data-mid', messageId);
+        // 手势：双击点赞（👍），右键设置回复
+        msgDiv.addEventListener('dblclick', (e) => {
+          const mid = messageId; if (!mid) return;
+          sendReaction(mid, '👍');
+        });
+        msgDiv.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          const mid = messageId; if (!mid) return;
+          setReply(mid);
+        });
 
         // 昵称放在气泡外面
         if (!isMe) {
@@ -1343,6 +1405,16 @@
           bubble.style.color = textColorForBg(color);
         }
 
+        // 引用（回复）
+        if (opts && opts.replyTo) {
+          const quote = document.createElement('div');
+          quote.className = 'quote';
+          const qw = messageAuthorById.get(opts.replyTo) || ('#' + opts.replyTo);
+          const qt = messageTextById.get(opts.replyTo) || '';
+          quote.textContent = `回复 ${qw}: ${qt ? qt.slice(0, 40) : ''}`;
+          bubble.appendChild(quote);
+        }
+
         const textSpan = document.createElement('div');
         textSpan.textContent = text;
         bubble.appendChild(textSpan);
@@ -1350,6 +1422,9 @@
         msgDiv.appendChild(bubble);
         messages.appendChild(msgDiv);
         scrollToBottom();
+
+        // 初始渲染反应条（如已有）
+        if (messageId) renderReactionsFor(messageId);
       }
 
       // 邀请按钮
@@ -1402,12 +1477,120 @@
         });
       }
 
+      function tryParseJson(s) {
+        try { return JSON.parse(s); } catch { return null; }
+      }
+
+      async function handleIncomingMessage(m) {
+        // 版本提示
+        if ((m.proto && m.proto !== PROTO_VERSION) || (m.kdf && (m.kdf.iter !== KDF_ITER || m.kdf.saltVer !== KDF_SALT_VER))) {
+          addLine('【系统】检测到不同版本/参数的消息，若无法正常解密，请刷新页面或使用同版本链接', 'system');
+        }
+        const who = m.name ? m.name : `#${m.from}`;
+        const isMe = m.from === clientId;
+        const plaintext = await decryptMessage(m.text);
+        // 尝试解析结构化事件
+        const obj = tryParseJson(plaintext);
+        if (obj && typeof obj === 'object' && obj.kind) {
+          if (obj.kind === 'reaction' && obj.targetId && obj.emoji) {
+            // 反应事件（去重：使用 displayedMessageIds 记录已处理）
+            if (m.id && displayedMessageIds.has(m.id)) return;
+            if (m.id) {
+              displayedMessageIds.add(m.id);
+              displayedMessageIdsArray.push(m.id);
+              if (displayedMessageIdsArray.length > MESSAGE_ID_CACHE_SIZE) {
+                const oldId = displayedMessageIdsArray.shift();
+                displayedMessageIds.delete(oldId);
+              }
+            }
+            applyReaction(m.from, obj.targetId, obj.emoji);
+            return;
+          }
+          if (obj.kind === 'reply' && obj.replyTo && typeof obj.text === 'string') {
+            // 正常渲染消息，带引用 UI
+            addMessage(who, obj.text, isMe, m.color, m.id, { replyTo: obj.replyTo });
+            // 存索引用于后续引用
+            if (m.id) {
+              messageTextById.set(m.id, obj.text);
+              messageAuthorById.set(m.id, who);
+            }
+            return;
+          }
+          // 未识别结构化内容，降级为普通文本
+        }
+        // 普通文本
+        addMessage(who, plaintext, isMe, m.color, m.id);
+        if (m.id) {
+          messageTextById.set(m.id, plaintext);
+          messageAuthorById.set(m.id, who);
+        }
+      }
+
+      function getReactionsFor(mid) {
+        if (!reactions.has(mid)) reactions.set(mid, new Map());
+        return reactions.get(mid);
+      }
+
+      function applyReaction(fromId, targetId, emoji) {
+        const perMsg = getReactionsFor(targetId);
+        if (!perMsg.has(emoji)) perMsg.set(emoji, new Set());
+        const set = perMsg.get(emoji);
+        if (set.has(fromId)) set.delete(fromId); else set.add(fromId);
+        renderReactionsFor(targetId);
+      }
+
+      function renderReactionsFor(mid) {
+        const msgDiv = messages.querySelector(`.msg[data-mid="${mid}"]`);
+        if (!msgDiv) return;
+        const bubble = msgDiv.querySelector('.bubble');
+        if (!bubble) return;
+        let bar = bubble.querySelector('.reactions');
+        if (!bar) {
+          bar = document.createElement('div');
+          bar.className = 'reactions';
+          bubble.appendChild(bar);
+        }
+        bar.innerHTML = '';
+        const perMsg = reactions.get(mid);
+        if (!perMsg) return;
+        for (const [emoji, set] of perMsg.entries()) {
+          if (!set || set.size === 0) continue;
+          const chip = document.createElement('span');
+          chip.className = 'reaction-chip';
+          chip.textContent = `${emoji} ${set.size}`;
+          bar.appendChild(chip);
+        }
+      }
+
+      async function sendReaction(targetId, emoji) {
+        if (!isWsOpen()) return; // 简化：在线时发送
+        const payload = { kind: 'reaction', targetId, emoji };
+        const ciphertext = await encryptMessage(JSON.stringify(payload));
+        const out = { type: 'text', text: ciphertext, name: nameEl.value.trim() || undefined, proto: PROTO_VERSION, kdf: { saltVer: KDF_SALT_VER, iter: KDF_ITER } };
+        ws.send(JSON.stringify(out));
+      }
+
+      function setReply(targetId) {
+        currentReplyTo = targetId;
+        replyWhoEl.textContent = messageAuthorById.get(targetId) || ('#' + targetId);
+        replyPreviewEl.textContent = (messageTextById.get(targetId) || '').slice(0, 40);
+        replyBar.style.display = 'flex';
+      }
+      function clearReply() {
+        currentReplyTo = null;
+        replyBar.style.display = 'none';
+        replyWhoEl.textContent = '';
+        replyPreviewEl.textContent = '';
+      }
+      replyCancelBtn.addEventListener('click', clearReply);
+
       async function sendMessage(){
         const text = input.value.trim();
         if (!text) return;
         if (!isWsOpen()) {
           // 离线：将消息加密后加入待发送队列，并尝试重连
-          const ciphertext = await encryptMessage(text);
+          const plain = currentReplyTo ? JSON.stringify({ kind: 'reply', replyTo: currentReplyTo, text }) : text;
+          const ciphertext = await encryptMessage(plain);
           const payload = { type: 'text', text: ciphertext, name: nameEl.value.trim() || undefined, proto: PROTO_VERSION, kdf: { saltVer: KDF_SALT_VER, iter: KDF_ITER } };
           sendQueue.push({ roomId: currentRoomId, payload });
           addLine(`离线，已加入待发送队列（${sendQueue.length}）`, 'system');
@@ -1419,10 +1602,12 @@
           setTimeout(scrollToBottom, 50);
           return;
         }
-        const ciphertext = await encryptMessage(text);
+        const plain = currentReplyTo ? JSON.stringify({ kind: 'reply', replyTo: currentReplyTo, text }) : text;
+        const ciphertext = await encryptMessage(plain);
         const payload = { type: 'text', text: ciphertext, name: nameEl.value.trim() || undefined, proto: PROTO_VERSION, kdf: { saltVer: KDF_SALT_VER, iter: KDF_ITER } };
         ws.send(JSON.stringify(payload));
         input.value = '';
+        if (currentReplyTo) clearReply();
         // 保持输入聚焦（仅当确实失焦时）
         if (document.activeElement !== input) {
           input.focus({ preventScroll: true });
