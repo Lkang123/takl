@@ -948,18 +948,24 @@
       const urlRoom = getRoomFromURL();
       const savedRoom = store.getItem('currentRoom');
 
-      if (savedRoom) {
+      // 🔧 修复：URL 参数优先于 localStorage（通过链接分享时正确加入房间）
+      if (urlRoom) {
+        // 通过邀请链接访问，自动加入该房间
+        // 如果 URL 房间与 localStorage 不同，清除旧房间记录
+        if (savedRoom && savedRoom !== urlRoom) {
+          store.removeItem('currentRoom');
+          console.log(`[房间切换] 从 ${savedRoom} 切换到 ${urlRoom}`);
+        }
+        roomPasswordEl.value = urlRoom;
+        statusEl.style.display = 'flex';
+        statusEl.textContent = '正在连接…';
+        connectToRoom(urlRoom);
+      } else if (savedRoom) {
         // 优先自动重连上次的房间（刷新页面保持在线）
         // 不显示认证页面，避免闪烁；仅在 header 显示连接状态
         statusEl.style.display = 'flex';
         statusEl.textContent = '正在连接…';
         connectToRoom(savedRoom);
-      } else if (urlRoom) {
-        // 通过邀请链接访问，自动加入该房间
-        roomPasswordEl.value = urlRoom;
-        statusEl.style.display = 'flex';
-        statusEl.textContent = '正在连接…';
-        connectToRoom(urlRoom);
       } else {
         // 首次访问，显示认证界面
         authDiv.style.display = 'flex';

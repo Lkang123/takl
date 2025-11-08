@@ -63,8 +63,12 @@ function getRoom(roomId, ownerId = null) {
     rooms.set(roomId, {
       clients: new Set(),
       history: [],
-      owner: ownerId // 记录房主ID
+      owner: ownerId, // 记录房主ID
+      lastActivity: Date.now() // 🔧 新增：记录最后活动时间
     });
+  } else {
+    // 🔧 新增：更新最后活动时间
+    rooms.get(roomId).lastActivity = Date.now();
   }
   return rooms.get(roomId);
 }
@@ -166,8 +170,10 @@ wss.on('connection', (ws, req) => {
   ws.isAlive = true;
   ws.on('pong', () => (ws.isAlive = true));
 
-  // 将用户加入房间（如果是新房间，设置为房主）
-  const room = getRoom(ws.roomId, ws.id);
+  // 🔧 修复：区分创建房间和加入房间
+  // 只有在房间不存在时，才将当前用户设置为房主
+  const roomExists = rooms.has(ws.roomId);
+  const room = getRoom(ws.roomId, roomExists ? null : ws.id);
   const isOwner = room.owner === ws.id;
   room.clients.add(ws);
 
@@ -269,10 +275,10 @@ wss.on('connection', (ws, req) => {
       // 广播更新后的在线人数
       broadcastRoomUserCount(ws.roomId);
 
-      // 如果房间空了，可以选择删除房间（可选）
+      // 🔧 修复：空房间保留历史，由定时任务清理过期房间
       if (room.clients.size === 0) {
-        console.log(`[房间 ${ws.roomId}] 已清空，保留历史记录`);
-        // rooms.delete(ws.roomId); // 取消注释以删除空房间
+        room.lastActivity = Date.now(); // 更新最后活动时间
+        console.log(`[房间 ${ws.roomId}] 已清空，保留历史记录（将在24小时后自动清理）`);
       }
     }
   });
@@ -289,7 +295,34 @@ const interval = setInterval(() => {
   });
 }, 30000);
 
-wss.on('close', () => clearInterval(interval));
+// 🔧 新增：定时清理过期房间（24小时无活动）
+const ROOM_EXPIRY_TIME = 24 * 60 * 60 * 1000; // 24小时（毫秒）
+const cleanupInterval = setInterval(() => {
+  const now = Date.now();
+  let cleanedCount = 0;
+
+  for (const [roomId, room] of rooms.entries()) {
+    // 跳过有活跃用户的房间
+    if (room.clients.size > 0) continue;
+
+    // 检查房间是否已过期
+    const inactiveTime = now - room.lastActivity;
+    if (inactiveTime > ROOM_EXPIRY_TIME) {
+      rooms.delete(roomId);
+      cleanedCount++;
+      console.log(`[房间清理] 房间 ${roomId} 已过期（${Math.floor(inactiveTime / 3600000)}小时无活动）`);
+    }
+  }
+
+  if (cleanedCount > 0) {
+    console.log(`[房间清理] 共清理 ${cleanedCount} 个过期房间，当前房间数：${rooms.size}`);
+  }
+}, 60 * 60 * 1000); // 每小时检查一次
+
+wss.on('close', () => {
+  clearInterval(interval);
+  clearInterval(cleanupInterval);
+});
 
 function getLanAddresses() {
   const nets = os.networkInterfaces();
