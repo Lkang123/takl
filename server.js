@@ -288,6 +288,16 @@ wss.on('connection', (ws, req) => {
   const roomExists = rooms.has(ws.roomId);
   const room = getRoom(ws.roomId, roomExists ? null : ws.id);
   const isOwner = room.owner === ws.id;
+  // 去重：同一 roomId + 同一用户 id 的多连接仅保留最新
+  let dupCount = 0;
+  for (const c of Array.from(room.clients)) {
+    if (c !== ws && c.id === ws.id) {
+      try { c.close(4001, 'Replaced by new connection'); } catch {}
+      room.clients.delete(c);
+      dupCount++;
+    }
+  }
+  const isReconnect = dupCount > 0;
   room.clients.add(ws);
 
   // 发送历史消息给新连接的用户
@@ -305,7 +315,10 @@ wss.on('connection', (ws, req) => {
       isOwner: isOwner // 告诉客户端是否为房主
     })
   );
-  broadcastToRoom(ws.roomId, { type: 'system', text: `${display} 加入了`, at: Date.now() }, null);
+  // 避免重连时重复“加入了”提示
+  if (!isReconnect) {
+    broadcastToRoom(ws.roomId, { type: 'system', text: `${display} 加入了`, at: Date.now() }, null);
+  }
 
   // 广播更新后的在线人数
   broadcastRoomUserCount(ws.roomId);
@@ -425,19 +438,24 @@ wss.on('connection', (ws, req) => {
 
   // Override broken/previous close handler with a clean CN message
   ws.removeAllListeners('close');
-  ws.on('close', () => {
+  ws.on('close', (code, reasonBuf) => {
     const display = ws.name || ws.id;
+    const reason = Buffer.isBuffer(reasonBuf) ? reasonBuf.toString() : String(reasonBuf || '');
 
     // 从房间移除用户
     const room = rooms.get(ws.roomId);
     if (room) {
       room.clients.delete(ws);
 
-      // 广播离开消息
-      broadcastToRoom(ws.roomId, { type: 'system', text: `${display} 离开了`, at: Date.now() }, null);
+      // 广播离开消息（被替换关闭不播）
+      if (code !== 4001 && reason !== 'Replaced by new connection') {
+        broadcastToRoom(ws.roomId, { type: 'system', text: `${display} 离开了`, at: Date.now() }, null);
+      }
 
       // 广播更新后的在线人数
       broadcastRoomUserCount(ws.roomId);
+      // 广播成员列表
+      broadcastRoomRoster(ws.roomId);
       // 广播成员列表
       broadcastRoomRoster(ws.roomId);
 
