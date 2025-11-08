@@ -533,8 +533,9 @@
       #messages .msg { -webkit-user-select: none; user-select: none; }
 
       #messages .msg.left .bubble {
-        /* 背景色将由 JavaScript 动态设置 */
-        color: #fff;
+        /* 统一样式：他人气泡为浅灰底、黑字 */
+        background: #f2f2f7;
+        color: #000;
         border-bottom-left-radius: 4px;
       }
 
@@ -1475,11 +1476,9 @@
         const bubble = document.createElement('div');
         bubble.className = 'bubble';
 
-        // 如果不是自己的消息，应用用户专属颜色
-        if (!isMe && color) {
-          bubble.style.backgroundColor = color;
-          bubble.style.color = textColorForBg(color);
-        }
+        // 统一气泡配色：
+        // - 他人：CSS 已设浅灰底黑字
+        // - 自己：CSS 已设蓝底白字
 
         // 引用（回复）
         if (opts && opts.replyTo) {
