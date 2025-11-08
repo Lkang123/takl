@@ -905,8 +905,9 @@
         return crypto.subtle.deriveKey(
           {
             name: 'PBKDF2',
-            salt: encoder.encode('chat-room-salt-2025'),
-            iterations: 100000,
+            // 将 salt 与房间口令绑定，避免不同房间相同口令导出相同密钥
+            salt: encoder.encode('v1:' + password),
+            iterations: 200000,
             hash: 'SHA-256'
           },
           keyMaterial,
@@ -1138,6 +1139,9 @@
               }
               return addLine(`【系统】${m.text}`, 'system');
             }
+            if (m.type === 'messageError') {
+              return addLine(`【系统】${m.text}`, 'system');
+            }
             if (m.type === 'roomDissolved') {
               // 房间被解散 - 立即清除本地存储和 URL 参数
               store.removeItem('currentRoom');
@@ -1191,6 +1195,19 @@
         scrollToBottom();
       }
 
+      function textColorForBg(hex) {
+        try {
+          const c = (hex || '').replace('#','');
+          const r = parseInt(c.slice(0,2), 16);
+          const g = parseInt(c.slice(2,4), 16);
+          const b = parseInt(c.slice(4,6), 16);
+          const luminance = (0.299*r + 0.587*g + 0.114*b) / 255;
+          return luminance > 0.6 ? '#000' : '#fff';
+        } catch (_) {
+          return '#fff';
+        }
+      }
+
       function addMessage(who, text, isMe, color, messageId) {
         // 🔧 消息去重：如果提供了消息ID且已显示过，则跳过
         if (messageId) {
@@ -1226,6 +1243,7 @@
         // 如果不是自己的消息，应用用户专属颜色
         if (!isMe && color) {
           bubble.style.backgroundColor = color;
+          bubble.style.color = textColorForBg(color);
         }
 
         const textSpan = document.createElement('div');

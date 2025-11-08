@@ -14,7 +14,7 @@ const publicDir = path.join(__dirname, 'public');
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.webmanifest': 'application/manifest+json; charset=utf-8',
@@ -45,6 +45,12 @@ const server = http.createServer((req, res) => {
       return;
     }
     res.setHeader('Content-Type', type);
+    // 简单缓存策略：HTML 不缓存，其他静态资源适度缓存
+    if (ext === '.html') {
+      res.setHeader('Cache-Control', 'no-store, max-age=0');
+    } else {
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+    }
     res.end(data);
   });
 });
@@ -54,8 +60,13 @@ let nextId = 0;
 
 // 多房间管理：{ roomId: { clients: Set, history: [], owner: string } }
 const rooms = new Map();
-const dissolvedRooms = new Set(); // 记录已解散的房间ID，防止重新加入
+// 记录已解散的房间：roomId -> 允许重新创建/加入的时间
+const dissolvedRooms = new Map();
 const MAX_HISTORY = 100;
+// 单条消息密文（Base64）长度上限（约16KB），超出将被拒绝
+const MAX_CIPHERTEXT_LEN = 16 * 1024;
+// 房间解散后的冷却期，避免同名立刻复用（12小时）
+const DISSOLVE_BLOCK_MS = 12 * 60 * 60 * 1000;
 
 // 获取或创建房间
 function getRoom(roomId, ownerId = null) {
@@ -156,11 +167,19 @@ wss.on('connection', (ws, req) => {
     return;
   }
 
-  // 检查房间是否已被解散
-  if (dissolvedRooms.has(qroom.trim())) {
-    ws.send(JSON.stringify({ type: 'error', text: '该房间已被解散，无法加入' }));
-    ws.close(1008, 'Room dissolved');
-    return;
+  // 检查房间是否处于解散冷却期
+  {
+    const roomIdTrim = qroom.trim();
+    const banUntil = dissolvedRooms.get(roomIdTrim);
+    if (banUntil) {
+      if (Date.now() < banUntil) {
+        ws.send(JSON.stringify({ type: 'error', text: '该房间已被解散，暂时无法加入' }));
+        ws.close(1008, 'Room dissolved');
+        return;
+      }
+      // 冷却已过期，移除
+      dissolvedRooms.delete(roomIdTrim);
+    }
   }
 
   ws.id = qid && qid.trim() ? qid.trim() : String(++nextId);
@@ -205,6 +224,12 @@ wss.on('connection', (ws, req) => {
       payload = { text: buf.toString() }; // keep it simple, server decides final type
     }
 
+    // 基本校验：除解散指令外，限制密文长度
+    if (payload && payload.type !== 'dissolveRoom' && typeof payload.text === 'string' && payload.text.length > MAX_CIPHERTEXT_LEN) {
+      try { ws.send(JSON.stringify({ type: 'messageError', text: '消息过长，已被服务器拒绝' })); } catch {}
+      return;
+    }
+
     // 处理解散房间请求
     if (payload.type === 'dissolveRoom') {
       const room = rooms.get(ws.roomId);
@@ -226,8 +251,8 @@ wss.on('connection', (ws, req) => {
         at: Date.now()
       }, null);
 
-      // 标记房间为已解散（防止重新加入）
-      dissolvedRooms.add(ws.roomId);
+      // 标记房间为已解散（进入冷却，防止立即复用）
+      dissolvedRooms.set(ws.roomId, Date.now() + DISSOLVE_BLOCK_MS);
 
       // 关闭所有连接并删除房间
       for (const client of room.clients) {
@@ -236,7 +261,7 @@ wss.on('connection', (ws, req) => {
         }
       }
       rooms.delete(ws.roomId);
-      console.log(`[房间 ${ws.roomId}] 已被房主解散并加入黑名单`);
+      console.log(`[房间 ${ws.roomId}] 已被房主解散，进入冷却期`);
       return;
     }
 
@@ -250,14 +275,15 @@ wss.on('connection', (ws, req) => {
       color: getUserColor(ws.id), // 添加用户专属颜色
       id: `${Date.now()}-${ws.id}-${Math.random().toString(36).substr(2, 9)}` // 🔧 添加消息唯一ID
     };
-    // 日志：服务器看到的消息（应该是加密的）
-    console.log(`[房间 ${ws.roomId}] ${message.name || message.from}: ${message.text.substring(0, 50)}...`);
+    // 日志：仅记录密文长度，避免输出内容
+    const len = typeof message.text === 'string' ? message.text.length : 0;
+    console.log(`[房间 ${ws.roomId}] ${message.name || message.from}: len=${len}`);
 
     // 添加到房间历史记录
     addToRoomHistory(ws.roomId, message);
 
-    // 🔧 修复：广播到同一房间（排除发送者自己）
-    broadcastToRoom(ws.roomId, message, ws);
+    // 广播到同一房间（包含发送者，实现回显）
+    broadcastToRoom(ws.roomId, message, null);
   });
 
   // Override broken/previous close handler with a clean CN message
@@ -318,6 +344,17 @@ const cleanupInterval = setInterval(() => {
   if (cleanedCount > 0) {
     console.log(`[房间清理] 共清理 ${cleanedCount} 个过期房间，当前房间数：${rooms.size}`);
   }
+  // 清理已过期的解散冷却记录
+  let banCleaned = 0;
+  for (const [rid, until] of dissolvedRooms.entries()) {
+    if (now >= until) {
+      dissolvedRooms.delete(rid);
+      banCleaned++;
+    }
+  }
+  if (banCleaned > 0) {
+    console.log(`[房间清理] 释放 ${banCleaned} 个已过期的房间冷却记录`);
+  }
 }, 60 * 60 * 1000); // 每小时检查一次
 
 wss.on('close', () => {
@@ -347,4 +384,3 @@ server.listen(PORT, HOST, () => {
     console.log('No LAN IPv4 address detected.');
   }
 });
-
