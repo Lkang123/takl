@@ -533,9 +533,9 @@
       #messages .msg { -webkit-user-select: none; user-select: none; }
 
       #messages .msg.left .bubble {
-        /* 他人气泡：深灰底、白字（更接近你截圖的风格） */
-        background: #2c2c2e; /* iOS 深色系统灰 */
-        color: #fff;
+        /* 他人气泡：更浅的灰（iMessage 风格），黑字 */
+        background: #e5e5ea;
+        color: #000;
         border-bottom-left-radius: 4px;
       }
 
@@ -589,8 +589,9 @@
       }
       /* 左侧（他人）引用条：深灰底 + 浅灰字，更贴近截图 */
       #messages .msg.left .quote {
-        background: #3a3a3c;
-        color: #c7c7cc;
+        /* 浅灰气泡下的引用：再浅一点的灰底 + 深灰字 */
+        background: #f2f2f7;
+        color: #3c3c43;
       }
       /* 右侧（自己）引用条：在蓝底旁保持白字半透明底 */
       #messages .msg.right .quote {
