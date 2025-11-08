@@ -1677,8 +1677,12 @@
         replyWhoEl.textContent = messageAuthorById.get(targetId) || ('#' + targetId);
         replyPreviewEl.textContent = (messageTextById.get(targetId) || '').slice(0, 40);
         replyBar.style.display = 'flex';
-        // 显示回复条会占用高度，如果用户本就在底部附近，贴底避免“被遮挡”
-        requestAnimationFrame(() => { if (isNearBottom(200)) scrollToBottom(); });
+        // 自动聚焦输入框并滚动到底部（不再依赖是否靠近底部）
+        setTimeout(() => { try { input.focus({ preventScroll: true }); } catch (_) {} }, 0);
+        requestAnimationFrame(() => {
+          scrollToBottom();
+          setTimeout(scrollToBottom, 30);
+        });
       }
       function clearReply() {
         currentReplyTo = null;
