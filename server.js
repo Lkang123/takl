@@ -248,6 +248,7 @@ wss.on('connection', (ws, req) => {
       at: Date.now(),
       type: 'message',
       color: getUserColor(ws.id), // 添加用户专属颜色
+      id: `${Date.now()}-${ws.id}-${Math.random().toString(36).substr(2, 9)}` // 🔧 添加消息唯一ID
     };
     // 日志：服务器看到的消息（应该是加密的）
     console.log(`[房间 ${ws.roomId}] ${message.name || message.from}: ${message.text.substring(0, 50)}...`);

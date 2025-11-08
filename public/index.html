@@ -740,6 +740,11 @@
       // 系统消息去重：记录最近的系统消息和时间戳
       const recentSystemMessages = new Map(); // key: 消息文本, value: 时间戳
       const SYSTEM_MSG_DEDUPE_WINDOW = 10000; // 10秒内相同消息去重
+
+      // 🔧 用户消息去重：记录已显示消息的ID
+      const displayedMessageIds = new Set(); // 存储已显示的消息ID
+      const MESSAGE_ID_CACHE_SIZE = 1000; // 最多缓存1000条消息ID
+      const displayedMessageIdsArray = []; // 用于FIFO管理
       function hash(s){ let h=0; for(let i=0;i<s.length;i++){ h=(h*31 + s.charCodeAt(i))>>>0; } return h; }
       function nicknameFromId(id){
         const prefixes = ['在逃', '退役', '资深', '见习', '实习', '临时', '兼职', '全职', '首席', '御用', '专业', '业余', '神秘', '隐藏', '传说中的', '迷路的', '熬夜', '摸鱼', '划水', '潜水'];
@@ -1023,6 +1028,12 @@
       });
 
       async function connectToRoom(roomId) {
+        // 🔧 优化：关闭旧连接后再建立新连接
+        if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+          ws.close();
+          ws = null;
+        }
+
         authStatusEl.textContent = '正在生成加密密钥…';
         authStatusEl.style.color = '#8e8e93';
 
@@ -1103,7 +1114,7 @@
                   const who = msg.name ? msg.name : `#${msg.from}`;
                   const isMe = msg.from === clientId;
                   const plaintext = await decryptMessage(msg.text);
-                  addMessage(who, plaintext, isMe, msg.color);
+                  addMessage(who, plaintext, isMe, msg.color, msg.id); // 🔧 传入消息ID
                 }
                 addLine('--- 以上是历史消息 ---', 'system');
               }
@@ -1136,7 +1147,7 @@
               const isMe = m.from === clientId;
               // 解密消息
               const plaintext = await decryptMessage(m.text);
-              return addMessage(who, plaintext, isMe, m.color);
+              return addMessage(who, plaintext, isMe, m.color, m.id); // 🔧 传入消息ID
             }
           } catch (_) {
             addLine(String(e.data));
@@ -1173,7 +1184,24 @@
         scrollToBottom();
       }
 
-      function addMessage(who, text, isMe, color) {
+      function addMessage(who, text, isMe, color, messageId) {
+        // 🔧 消息去重：如果提供了消息ID且已显示过，则跳过
+        if (messageId) {
+          if (displayedMessageIds.has(messageId)) {
+            return; // 消息已显示，跳过
+          }
+
+          // 记录消息ID
+          displayedMessageIds.add(messageId);
+          displayedMessageIdsArray.push(messageId);
+
+          // 维护缓存大小：FIFO清理
+          if (displayedMessageIdsArray.length > MESSAGE_ID_CACHE_SIZE) {
+            const oldId = displayedMessageIdsArray.shift();
+            displayedMessageIds.delete(oldId);
+          }
+        }
+
         const msgDiv = document.createElement('div');
         msgDiv.className = 'msg ' + (isMe ? 'right' : 'left');
 
