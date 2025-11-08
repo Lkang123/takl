@@ -106,6 +106,9 @@ const MAX_HISTORY = 100;
 const MAX_CIPHERTEXT_LEN = 16 * 1024;
 // 房间解散后的冷却期，避免同名立刻复用（12小时）
 const DISSOLVE_BLOCK_MS = 12 * 60 * 60 * 1000;
+// 昵称变更公告开关与冷却
+const RENAME_ANNOUNCE = process.env.RENAME_ANNOUNCE !== '0';
+const RENAME_COOLDOWN_MS = parseInt(process.env.RENAME_COOLDOWN_MS || '30000', 10) | 0;
 
 // 获取或创建房间
 function getRoom(roomId, ownerId = null) {
@@ -156,7 +159,7 @@ function broadcastRoomRoster(roomId) {
   if (!room) return;
   const list = Array.from(room.clients)
     .filter(c => c.readyState === WebSocket.OPEN)
-    .map(c => ({ id: c.id, name: c.name || c.id, color: getUserColor(c.id) }));
+    .map(c => ({ id: c.id, name: c.name || c.id, color: getUserColor(c.id), isOwner: room.owner === c.id }));
   broadcastToRoom(roomId, { type: 'roster', list, count: list.length, at: Date.now() }, null);
 }
 
@@ -342,9 +345,19 @@ wss.on('connection', (ws, req) => {
     // 处理昵称更新
     if (payload.type === 'updateName') {
       if (payload && typeof payload.name === 'string') {
+        const now2 = Date.now();
         const newName = payload.name.trim().slice(0, 32);
+        const oldDisplay = ws.name ? ws.name : ws.id;
         ws.name = newName || undefined;
+        const newDisplay = ws.name ? ws.name : ws.id;
         broadcastRoomRoster(ws.roomId);
+        // 可选公告：限冷却且确实发生变化
+        if (RENAME_ANNOUNCE && oldDisplay !== newDisplay) {
+          if (!ws._lastRenameAnnounceAt || (now2 - ws._lastRenameAnnounceAt) > RENAME_COOLDOWN_MS) {
+            broadcastToRoom(ws.roomId, { type: 'system', text: `${oldDisplay} 修改昵称为 ${newDisplay}`, at: Date.now() }, null);
+            ws._lastRenameAnnounceAt = now2;
+          }
+        }
       }
       return;
     }

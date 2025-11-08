@@ -25,6 +25,8 @@
 
 - `PORT`：服务器端口（默认 3000）
 - `ALLOWED_ORIGINS`：允许的网页来源（Origin）白名单，逗号分隔。例如：`http://localhost:3000,https://your.domain`
+- `RENAME_ANNOUNCE`：是否公告改名（默认开启，设为 `0` 关闭）
+- `RENAME_COOLDOWN_MS`：改名公告冷却时间（默认 30000 毫秒）
 
 ## 本地运行
 

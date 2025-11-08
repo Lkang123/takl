@@ -1262,14 +1262,30 @@
       function renderRoster(list) {
         if (!rosterEl) return;
         rosterEl.innerHTML = '';
-        for (const m of (list || [])) {
+        const sorted = (list || []).slice().sort((a, b) => {
+          function rank(x){
+            if (x.isOwner) return 0; // 房主优先
+            if (x.id === clientId) return 1; // 我其次
+            return 2; // 其他
+          }
+          const ra = rank(a), rb = rank(b);
+          if (ra !== rb) return ra - rb;
+          const na = (a.name || a.id);
+          const nb = (b.name || b.id);
+          return na.localeCompare(nb);
+        });
+        for (const m of sorted) {
           const chip = document.createElement('div');
           chip.className = 'roster-chip';
           const dot = document.createElement('span');
           dot.className = 'roster-dot';
           if (m.color) dot.style.backgroundColor = m.color;
           const name = document.createElement('span');
-          name.textContent = m.name || m.id;
+          const base = m.name || m.id;
+          const marks = [];
+          if (m.id === clientId) marks.push('我');
+          if (m.isOwner) marks.push('房主');
+          name.textContent = marks.length ? `${base}（${marks.join('/') }）` : base;
           chip.appendChild(dot);
           chip.appendChild(name);
           rosterEl.appendChild(chip);
