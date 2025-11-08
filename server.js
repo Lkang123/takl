@@ -27,6 +27,35 @@ const MIME = {
 
 const server = http.createServer((req, res) => {
   const urlPath = (req.url || '/').split('?')[0];
+  // 内置健康检查与指标端点（优先处理）
+  if (urlPath === '/healthz') {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.end(JSON.stringify({ ok: true, uptime: process.uptime(), rooms: rooms.size, clients: wss.clients.size }));
+    return;
+  }
+  if (urlPath === '/metrics') {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    const roomsDetail = {};
+    for (const [rid, room] of rooms.entries()) {
+      roomsDetail[rid] = {
+        clients: Array.from(room.clients).filter(c => c.readyState === WebSocket.OPEN).length,
+        owner: room.owner,
+        history: room.history.length,
+        lastActivity: room.lastActivity
+      };
+    }
+    const body = {
+      ok: true,
+      uptime: process.uptime(),
+      rooms: rooms.size,
+      clients: wss.clients.size,
+      dissolvedRooms: dissolvedRooms.size,
+      metrics: METRICS,
+      roomsDetail
+    };
+    res.end(JSON.stringify(body));
+    return;
+  }
   const resolvedPath = path.normalize(
     path.join(publicDir, urlPath === '/' ? 'index.html' : urlPath)
   );
@@ -55,7 +84,17 @@ const server = http.createServer((req, res) => {
   });
 });
 
-const wss = new WebSocket.Server({ server });
+// WebSocket server with manual upgrade for Origin 校验和自定义参数
+const wss = new WebSocket.Server({ noServer: true, maxPayload: 16 * 1024, perMessageDeflate: false });
+// 运行时指标（仅计数器）
+const METRICS = {
+  startTs: Date.now(),
+  rejectedTooLong: 0,
+  rateLimited: 0,
+  broadcastsSkipped: 0,
+  messagesTotal: 0,
+  dissolveBlocked: 0
+};
 let nextId = 0;
 
 // 多房间管理：{ roomId: { clients: Set, history: [], owner: string } }
@@ -91,8 +130,13 @@ function broadcastToRoom(roomId, data, exclude) {
 
   const out = typeof data === 'string' ? data : JSON.stringify(data);
   for (const client of room.clients) {
+    // 背压保护：当某个客户端 send 缓冲过大时跳过它，避免阻塞
     if (client.readyState === WebSocket.OPEN && client !== exclude) {
-      client.send(out);
+      if (client.bufferedAmount < 1024 * 1024) {
+        client.send(out);
+      } else {
+        METRICS.broadcastsSkipped++;
+      }
     }
   }
 }
@@ -104,6 +148,16 @@ function broadcastRoomUserCount(roomId) {
 
   const count = Array.from(room.clients).filter(c => c.readyState === WebSocket.OPEN).length;
   broadcastToRoom(roomId, { type: 'userCount', count }, null);
+}
+
+// 广播房间成员列表
+function broadcastRoomRoster(roomId) {
+  const room = rooms.get(roomId);
+  if (!room) return;
+  const list = Array.from(room.clients)
+    .filter(c => c.readyState === WebSocket.OPEN)
+    .map(c => ({ id: c.id, name: c.name || c.id, color: getUserColor(c.id) }));
+  broadcastToRoom(roomId, { type: 'roster', list, count: list.length, at: Date.now() }, null);
 }
 
 // 添加消息到房间历史记录
@@ -146,18 +200,51 @@ function getUserColor(userId) {
   return colors[Math.abs(hash) % colors.length];
 }
 
+// 简单的 Origin 白名单校验
+function isAllowedOrigin(origin, hostHeader) {
+  if (!origin) return true; // 非浏览器/本地工具
+  try {
+    const u = new URL(origin);
+    // 环境变量可指定允许的 Origin 列表（逗号分隔）
+    const envList = (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+    if (envList.length && envList.includes(origin)) return true;
+    // 允许与 Host 相同的源（含端口），以及 localhost 调试
+    const host = (hostHeader || '').toLowerCase();
+    const originHostPort = `${u.hostname.toLowerCase()}${u.port ? ':' + u.port : ''}`;
+    if (originHostPort === host) return true;
+    if (u.hostname === 'localhost') return true;
+  } catch {}
+  return false;
+}
+
+// 处理 HTTP Upgrade 以进行 Origin 校验
+server.on('upgrade', (req, socket, head) => {
+  const origin = req.headers['origin'];
+  const host = req.headers['host'];
+  if (!isAllowedOrigin(origin, host)) {
+    socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+    try { socket.destroy(); } catch {}
+    return;
+  }
+  wss.handleUpgrade(req, socket, head, (ws) => {
+    wss.emit('connection', ws, req);
+  });
+});
+
 wss.on('connection', (ws, req) => {
   // parse query params for persistent identity, name, and room
-  let u, qid, qname, qroom;
+  let u, qid, qname, qroom, qv;
   try {
     u = new URL(req.url, 'http://localhost');
     qid = u.searchParams.get('id');
     qname = u.searchParams.get('name');
     qroom = u.searchParams.get('room');
+    qv = u.searchParams.get('v') || 'v1';
   } catch {
     qid = null;
     qname = null;
     qroom = null;
+    qv = 'v1';
   }
 
   // 房间密码即房间ID（如果没有提供，拒绝连接）
@@ -175,6 +262,7 @@ wss.on('connection', (ws, req) => {
       if (Date.now() < banUntil) {
         ws.send(JSON.stringify({ type: 'error', text: '该房间已被解散，暂时无法加入' }));
         ws.close(1008, 'Room dissolved');
+        METRICS.dissolveBlocked++;
         return;
       }
       // 冷却已过期，移除
@@ -187,6 +275,9 @@ wss.on('connection', (ws, req) => {
   ws.roomId = qroom.trim(); // 保存用户所在房间
 
   ws.isAlive = true;
+  ws.proto = qv; // 记录客户端声明的协议版本
+  // 每连接速率限制（漏桶）：每秒 5 条，瞬时突发 10 条
+  ws._rate = { tokens: 10, last: Date.now() };
   ws.on('pong', () => (ws.isAlive = true));
 
   // 🔧 修复：区分创建房间和加入房间
@@ -215,6 +306,8 @@ wss.on('connection', (ws, req) => {
 
   // 广播更新后的在线人数
   broadcastRoomUserCount(ws.roomId);
+  // 广播成员列表
+  broadcastRoomRoster(ws.roomId);
 
   ws.on('message', (buf) => {
     let payload;
@@ -224,9 +317,35 @@ wss.on('connection', (ws, req) => {
       payload = { text: buf.toString() }; // keep it simple, server decides final type
     }
 
-    // 基本校验：除解散指令外，限制密文长度
-    if (payload && payload.type !== 'dissolveRoom' && typeof payload.text === 'string' && payload.text.length > MAX_CIPHERTEXT_LEN) {
+    // 基本校验：仅对文本消息限制密文长度
+    if (payload && payload.type === 'text' && typeof payload.text === 'string' && payload.text.length > MAX_CIPHERTEXT_LEN) {
+      METRICS.rejectedTooLong++;
       try { ws.send(JSON.stringify({ type: 'messageError', text: '消息过长，已被服务器拒绝' })); } catch {}
+      return;
+    }
+
+    // 速率限制（按连接）
+    const now = Date.now();
+    const rate = ws._rate;
+    const refill = (now - rate.last) * (5 / 1000); // 5 tokens/sec
+    rate.tokens = Math.min(10, rate.tokens + refill);
+    rate.last = now;
+    if (payload && payload.type === 'text') {
+      if (rate.tokens < 1) {
+        METRICS.rateLimited++;
+        try { ws.send(JSON.stringify({ type: 'messageError', text: '发送过快，请稍后再试' })); } catch {}
+        return;
+      }
+      rate.tokens -= 1;
+    }
+
+    // 处理昵称更新
+    if (payload.type === 'updateName') {
+      if (payload && typeof payload.name === 'string') {
+        const newName = payload.name.trim().slice(0, 32);
+        ws.name = newName || undefined;
+        broadcastRoomRoster(ws.roomId);
+      }
       return;
     }
 
@@ -273,11 +392,16 @@ wss.on('connection', (ws, req) => {
       at: Date.now(),
       type: 'message',
       color: getUserColor(ws.id), // 添加用户专属颜色
-      id: `${Date.now()}-${ws.id}-${Math.random().toString(36).substr(2, 9)}` // 🔧 添加消息唯一ID
+      id: `${Date.now()}-${ws.id}-${Math.random().toString(36).substr(2, 9)}`, // 🔧 添加消息唯一ID
+      proto: 'v1',
+      kdf: { saltVer: 'v1', iter: 200000 }
     };
-    // 日志：仅记录密文长度，避免输出内容
-    const len = typeof message.text === 'string' ? message.text.length : 0;
-    console.log(`[房间 ${ws.roomId}] ${message.name || message.from}: len=${len}`);
+    // 日志：仅记录密文长度（仅文本消息）
+    if (payload && payload.type === 'text') {
+      METRICS.messagesTotal++;
+      const len = typeof message.text === 'string' ? message.text.length : 0;
+      console.log(`[房间 ${ws.roomId}] ${message.name || message.from}: len=${len}`);
+    }
 
     // 添加到房间历史记录
     addToRoomHistory(ws.roomId, message);
@@ -301,6 +425,8 @@ wss.on('connection', (ws, req) => {
 
       // 广播更新后的在线人数
       broadcastRoomUserCount(ws.roomId);
+      // 广播成员列表
+      broadcastRoomRoster(ws.roomId);
 
       // 🔧 修复：空房间保留历史，由定时任务清理过期房间
       if (room.clients.size === 0) {

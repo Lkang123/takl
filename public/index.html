@@ -383,6 +383,33 @@
         border-bottom: 0.5px solid rgba(60, 60, 67, 0.12);
       }
 
+      /* 成员列表栏 */
+      .roster-bar {
+        flex: 0 0 auto;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 10px;
+        padding: 8px 16px;
+        background: #fff;
+        border-bottom: 0.5px solid rgba(60, 60, 67, 0.08);
+      }
+      .roster-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 8px;
+        border-radius: 999px;
+        background: #f2f2f7;
+        font-size: 12px;
+        color: #3c3c43;
+      }
+      .roster-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #999;
+      }
+
       .name-bar label {
         font-size: 14px;
         color: #8e8e93;
@@ -653,6 +680,7 @@
           <input id="name" type="text" placeholder="你的昵称" autocomplete="off" />
           <button id="inviteBtn">邀请</button>
         </div>
+        <div id="roster" class="roster-bar"></div>
         <div id="messages"></div>
         <form id="form">
           <input id="input" type="text" placeholder="iMessage" autocomplete="off" enterkeyhint="send" autocapitalize="off" autocorrect="off" spellcheck="false" />
@@ -684,6 +712,7 @@
       const authStatusEl = document.getElementById('authStatus');
       const roomInfoEl = document.getElementById('roomInfo');
       const messages = document.getElementById('messages');
+      const rosterEl = document.getElementById('roster');
       const form = document.getElementById('form');
       const input = document.getElementById('input');
       const nameEl = document.getElementById('name');
@@ -756,7 +785,21 @@
         store.setItem('name', nicknameFromId(clientId));
       }
       nameEl.value = store.getItem('name') || '';
-      nameEl.addEventListener('input', () => store.setItem('name', nameEl.value));
+      nameEl.addEventListener('input', () => {
+        store.setItem('name', nameEl.value);
+      });
+
+      // 昵称变更：轻度防抖，上报给服务器以更新成员列表
+      let nameUpdateTimer = null;
+      nameEl.addEventListener('input', () => {
+        if (nameUpdateTimer) clearTimeout(nameUpdateTimer);
+        nameUpdateTimer = setTimeout(() => {
+          if (isWsOpen()) {
+            const newName = nameEl.value.trim();
+            try { ws.send(JSON.stringify({ type: 'updateName', name: newName })); } catch {}
+          }
+        }, 300);
+      });
 
       let ws = null;
       let encryptionKey = null; // 加密密钥
@@ -789,7 +832,8 @@
         if (isWsOpen()) return; // 已连接
         if (reconnectTimer) return; // 已有定时器
         const base = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
-        const delay = immediate ? 0 : base;
+        const jitter = Math.floor(Math.random() * 300);
+        const delay = immediate ? 0 : (base + jitter);
         setStatus('重连中…');
         reconnectTimer = setTimeout(() => {
           reconnectTimer = null;
@@ -854,10 +898,16 @@
         return params.get('room');
       }
 
-      // 生成邀请链接
+      // 协议与 KDF 版本
+      const PROTO_VERSION = 'v1';
+      const KDF_ITER = 200000;
+      const KDF_SALT_VER = 'v1';
+
+      // 生成邀请链接（带版本参数）
       function getInviteLink(roomId) {
         const url = new URL(window.location.origin + window.location.pathname);
         url.searchParams.set('room', roomId);
+        url.searchParams.set('v', PROTO_VERSION);
         return url.toString();
       }
 
@@ -906,8 +956,8 @@
           {
             name: 'PBKDF2',
             // 将 salt 与房间口令绑定，避免不同房间相同口令导出相同密钥
-            salt: encoder.encode('v1:' + password),
-            iterations: 200000,
+            salt: encoder.encode(KDF_SALT_VER + ':' + password),
+            iterations: KDF_ITER,
             hash: 'SHA-256'
           },
           keyMaterial,
@@ -1055,7 +1105,8 @@
         const qs = new URLSearchParams({
           id: clientId,
           name: nameEl.value || '',
-          room: roomId
+          room: roomId,
+          v: PROTO_VERSION
         }).toString();
 
         ws = new WebSocket(`${proto}://${location.host}/?${qs}`);
@@ -1110,6 +1161,12 @@
               userCountEl.textContent = `(${m.count})`;
               return;
             }
+            if (m.type === 'roster') {
+              // 更新成员列表与人数
+              if (typeof m.count === 'number') userCountEl.textContent = `(${m.count})`;
+              renderRoster(m.list || []);
+              return;
+            }
             if (m.type === 'history') {
               // 已有内容时跳过历史，避免重连后重复渲染
               if (messages.childElementCount > 0) {
@@ -1119,6 +1176,9 @@
               if (m.messages && m.messages.length > 0) {
                 addLine('--- 历史消息 ---', 'system');
                 for (const msg of m.messages) {
+                  if ((msg.proto && msg.proto !== PROTO_VERSION) || (msg.kdf && (msg.kdf.iter !== KDF_ITER || msg.kdf.saltVer !== KDF_SALT_VER))) {
+                    addLine('【系统】历史消息包含不同版本/参数，若显示解密失败，请刷新或使用同版本链接', 'system');
+                  }
                   const who = msg.name ? msg.name : `#${msg.from}`;
                   const isMe = msg.from === clientId;
                   const plaintext = await decryptMessage(msg.text);
@@ -1154,6 +1214,10 @@
               return;
             }
             if (m.type === 'message') {
+              // 版本与 KDF 协商提示
+              if ((m.proto && m.proto !== PROTO_VERSION) || (m.kdf && (m.kdf.iter !== KDF_ITER || m.kdf.saltVer !== KDF_SALT_VER))) {
+                addLine('【系统】检测到不同版本/参数的消息，若无法正常解密，请刷新页面或使用同版本链接', 'system');
+              }
               const who = m.name ? m.name : `#${m.from}`;
               const isMe = m.from === clientId;
               // 解密消息
@@ -1193,6 +1257,23 @@
         div.textContent = text;
         messages.appendChild(div);
         scrollToBottom();
+      }
+
+      function renderRoster(list) {
+        if (!rosterEl) return;
+        rosterEl.innerHTML = '';
+        for (const m of (list || [])) {
+          const chip = document.createElement('div');
+          chip.className = 'roster-chip';
+          const dot = document.createElement('span');
+          dot.className = 'roster-dot';
+          if (m.color) dot.style.backgroundColor = m.color;
+          const name = document.createElement('span');
+          name.textContent = m.name || m.id;
+          chip.appendChild(dot);
+          chip.appendChild(name);
+          rosterEl.appendChild(chip);
+        }
       }
 
       function textColorForBg(hex) {
@@ -1311,7 +1392,7 @@
         if (!isWsOpen()) {
           // 离线：将消息加密后加入待发送队列，并尝试重连
           const ciphertext = await encryptMessage(text);
-          const payload = { type: 'text', text: ciphertext, name: nameEl.value.trim() || undefined };
+          const payload = { type: 'text', text: ciphertext, name: nameEl.value.trim() || undefined, proto: PROTO_VERSION, kdf: { saltVer: KDF_SALT_VER, iter: KDF_ITER } };
           sendQueue.push({ roomId: currentRoomId, payload });
           addLine(`离线，已加入待发送队列（${sendQueue.length}）`, 'system');
           input.value = '';
@@ -1323,7 +1404,7 @@
           return;
         }
         const ciphertext = await encryptMessage(text);
-        const payload = { type: 'text', text: ciphertext, name: nameEl.value.trim() || undefined };
+        const payload = { type: 'text', text: ciphertext, name: nameEl.value.trim() || undefined, proto: PROTO_VERSION, kdf: { saltVer: KDF_SALT_VER, iter: KDF_ITER } };
         ws.send(JSON.stringify(payload));
         input.value = '';
         // 保持输入聚焦（仅当确实失焦时）
