@@ -1495,7 +1495,7 @@
           quote.className = 'quote';
           const qw = messageAuthorById.get(opts.replyTo) || ('#' + opts.replyTo);
           const qt = messageTextById.get(opts.replyTo) || '';
-          quote.textContent = `回复 ${qw}: ${qt ? qt.slice(0, 60) : ''}`;
+          quote.textContent = `${qw}: ${qt ? qt.slice(0, 60) : ''}`;
           msgDiv.appendChild(quote);
         }
         messages.appendChild(msgDiv);
