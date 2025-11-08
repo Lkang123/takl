@@ -256,8 +256,8 @@ wss.on('connection', (ws, req) => {
     // 添加到房间历史记录
     addToRoomHistory(ws.roomId, message);
 
-    // 广播到同一房间
-    broadcastToRoom(ws.roomId, message);
+    // 🔧 修复：广播到同一房间（排除发送者自己）
+    broadcastToRoom(ws.roomId, message, ws);
   });
 
   // Override broken/previous close handler with a clean CN message

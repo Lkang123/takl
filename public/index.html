@@ -1028,9 +1028,16 @@
       });
 
       async function connectToRoom(roomId) {
-        // 🔧 优化：关闭旧连接后再建立新连接
-        if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
-          ws.close();
+        // 🔧 优化：清理旧连接的所有监听器，防止事件重复触发
+        if (ws) {
+          ws.onopen = null;
+          ws.onclose = null;
+          ws.onerror = null;
+          ws.onmessage = null;
+
+          if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+            ws.close();
+          }
           ws = null;
         }
 
@@ -1185,20 +1192,15 @@
       }
 
       function addMessage(who, text, isMe, color, messageId) {
-        // 🔍 调试：记录收到的消息
-        console.log('[addMessage] 收到消息:', { who, text: text.substring(0, 20), isMe, messageId });
-
         // 🔧 消息去重：如果提供了消息ID且已显示过，则跳过
         if (messageId) {
           if (displayedMessageIds.has(messageId)) {
-            console.log('[addMessage] 消息已显示，跳过:', messageId);
             return; // 消息已显示，跳过
           }
 
           // 记录消息ID
           displayedMessageIds.add(messageId);
           displayedMessageIdsArray.push(messageId);
-          console.log('[addMessage] 记录消息ID:', messageId, '(总数:', displayedMessageIds.size, ')');
 
           // 维护缓存大小：FIFO清理
           if (displayedMessageIdsArray.length > MESSAGE_ID_CACHE_SIZE) {
