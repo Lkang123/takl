@@ -465,6 +465,8 @@
         flex-direction: column;
         gap: 10px;
         -webkit-overflow-scrolling: touch;
+        /* 移动端：减少双击缩放干扰与300ms延迟 */
+        touch-action: manipulation;
       }
 
       /* 系统消息 - 缩小占比 */
@@ -527,15 +529,19 @@
         font-size: 16px;
         position: relative;
       }
+      /* 避免长按选择影响长按手势 */
+      #messages .msg { -webkit-user-select: none; user-select: none; }
 
       #messages .msg.left .bubble {
-        /* 背景色将由 JavaScript 动态设置 */
+        /* 他人气泡：较深灰底 + 白字 */
+        background: #3a3a3c;
         color: #fff;
         border-bottom-left-radius: 4px;
       }
 
       #messages .msg.right .bubble {
-        background: #007aff;
+        /* 降低饱和度的蓝色，更柔和 */
+        background: #4da3ff;
         color: #fff;
         border-bottom-right-radius: 4px;
       }
@@ -551,6 +557,86 @@
         background: #f2f2f7;
         border-top: 0.5px solid rgba(60, 60, 67, 0.12);
       }
+
+      /* 回复横条 */
+      .reply-bar {
+        flex: 0 0 auto;
+        display: none;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 8px 16px;
+        background: #fff;
+        border-top: 0.5px solid rgba(60, 60, 67, 0.12);
+        font-size: 13px;
+        color: #8e8e93;
+      }
+      .reply-bar .title { color: #3c3c43; font-weight: 500; }
+      .reply-bar .preview { color: #8e8e93; }
+      .reply-bar .close { border: none; background: transparent; color: #007aff; font-weight: 600; cursor: pointer; }
+
+      /* 引用块 */
+      .quote {
+        /* 独立于气泡的回复条：单独一行，不嵌入气泡（基础浅灰，左右侧再覆盖） */
+        font-size: 12px;
+        color: #3c3c43;
+        padding: 6px 10px;
+        margin-top: 6px;
+        margin-bottom: 0;
+        background: #e5e5ea;
+        border-radius: 10px;
+        max-width: 75%;
+      }
+      /* 左侧（他人）引用条：深灰底 + 浅灰字，更贴近截图 */
+      #messages .msg.left .quote {
+        /* 浅灰气泡下的引用：再浅一点的灰底 + 深灰字 */
+        background: #f2f2f7;
+        color: #3c3c43;
+      }
+      /* 右侧（自己）引用条：浅蓝底 + 品牌蓝文字，确保在白色背景也可见 */
+      #messages .msg.right .quote {
+        background: #63b0ff; /* 更贴近自家蓝，提升对比 */
+        color: #fff; /* 白字 */
+        font-weight: 500;
+      }
+
+      /* 反应条 */
+      .reactions {
+        margin-top: 6px;
+        display: inline-flex;
+        gap: 4px;
+        flex-wrap: wrap;
+      }
+      .reaction-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 6px;
+        font-size: 12px;
+        border-radius: 999px;
+        background: rgba(0,0,0,0.06);
+        color: #3c3c43;
+      }
+
+      /* 反应选择面板（移动端长按） */
+      .react-palette {
+        position: fixed;
+        z-index: 9999;
+        background: #fff;
+        border-radius: 12px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+        padding: 8px 10px;
+        display: none;
+        align-items: center;
+        gap: 6px;
+      }
+      .react-btn {
+        width: 36px; height: 36px; border-radius: 18px;
+        display: inline-flex; align-items: center; justify-content: center;
+        font-size: 20px; background: #f2f2f7; border: none; cursor: pointer;
+      }
+      .react-divider { width: 1px; height: 24px; background: rgba(0,0,0,0.08); margin: 0 6px; }
+      .react-action { font-size: 14px; color: #007aff; background: transparent; border: none; padding: 6px 8px; border-radius: 8px; }
 
       #input {
         flex: 1 1 auto;
@@ -682,6 +768,15 @@
         </div>
         <div id="roster" class="roster-bar"></div>
         <div id="messages"></div>
+        <div id="replyBar" class="reply-bar">
+          <div>
+            <span class="title">回复</span>
+            <span id="replyWho" class="preview"></span>
+            <span>：</span>
+            <span id="replyPreview" class="preview"></span>
+          </div>
+          <button id="replyCancel" class="close">取消</button>
+        </div>
         <form id="form">
           <input id="input" type="text" placeholder="iMessage" autocomplete="off" enterkeyhint="send" autocapitalize="off" autocorrect="off" spellcheck="false" />
           <button type="button" id="sendBtn">发送</button>
@@ -713,6 +808,13 @@
       const roomInfoEl = document.getElementById('roomInfo');
       const messages = document.getElementById('messages');
       const rosterEl = document.getElementById('roster');
+      const replyBar = document.getElementById('replyBar');
+      const replyWhoEl = document.getElementById('replyWho');
+      const replyPreviewEl = document.getElementById('replyPreview');
+      const replyCancelBtn = document.getElementById('replyCancel');
+      // 全局反应面板
+      let reactionPalette = null;
+      let paletteForMid = null;
       const form = document.getElementById('form');
       const input = document.getElementById('input');
       const nameEl = document.getElementById('name');
@@ -737,6 +839,7 @@
       }
 
       const store = window.localStorage;
+      const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
       let clientId = store.getItem('clientId');
       if (!clientId) {
         clientId = (Math.random().toString(36).slice(2, 10) + Date.now().toString(36)).slice(0, 12);
@@ -746,6 +849,11 @@
       // 滚动到底部的辅助函数
       function scrollToBottom() {
         messages.scrollTop = messages.scrollHeight;
+      }
+
+      function isNearBottom(threshold = 80) {
+        const dist = messages.scrollHeight - messages.scrollTop - messages.clientHeight;
+        return dist <= threshold;
       }
 
       // 输入框获得焦点时，自动滚到最底部（配合移动端软键盘）
@@ -805,6 +913,13 @@
       let encryptionKey = null; // 加密密钥
       let currentRoomId = null; // 当前房间ID
       let isRoomOwner = false; // 是否为房主
+      // 消息索引：用于回复预览
+      const messageTextById = new Map();
+      const messageAuthorById = new Map();
+      // 反应：messageId -> emoji -> Set(userId)
+      const reactions = new Map();
+      // 当前回复目标
+      let currentReplyTo = null;
 
       // 连接重连状态
       let reconnectTimer = null;
@@ -1176,13 +1291,7 @@
               if (m.messages && m.messages.length > 0) {
                 addLine('--- 历史消息 ---', 'system');
                 for (const msg of m.messages) {
-                  if ((msg.proto && msg.proto !== PROTO_VERSION) || (msg.kdf && (msg.kdf.iter !== KDF_ITER || msg.kdf.saltVer !== KDF_SALT_VER))) {
-                    addLine('【系统】历史消息包含不同版本/参数，若显示解密失败，请刷新或使用同版本链接', 'system');
-                  }
-                  const who = msg.name ? msg.name : `#${msg.from}`;
-                  const isMe = msg.from === clientId;
-                  const plaintext = await decryptMessage(msg.text);
-                  addMessage(who, plaintext, isMe, msg.color, msg.id); // 🔧 传入消息ID
+                  await handleIncomingMessage(msg);
                 }
                 addLine('--- 以上是历史消息 ---', 'system');
               }
@@ -1214,15 +1323,7 @@
               return;
             }
             if (m.type === 'message') {
-              // 版本与 KDF 协商提示
-              if ((m.proto && m.proto !== PROTO_VERSION) || (m.kdf && (m.kdf.iter !== KDF_ITER || m.kdf.saltVer !== KDF_SALT_VER))) {
-                addLine('【系统】检测到不同版本/参数的消息，若无法正常解密，请刷新页面或使用同版本链接', 'system');
-              }
-              const who = m.name ? m.name : `#${m.from}`;
-              const isMe = m.from === clientId;
-              // 解密消息
-              const plaintext = await decryptMessage(m.text);
-              return addMessage(who, plaintext, isMe, m.color, m.id); // 🔧 传入消息ID
+              return await handleIncomingMessage(m);
             }
           } catch (_) {
             addLine(String(e.data));
@@ -1231,6 +1332,7 @@
       }
 
       function addLine(text, cls) {
+        const stick = isNearBottom();
         // 系统消息去重逻辑
         if (cls === 'system') {
           const now = Date.now();
@@ -1256,7 +1358,13 @@
         if (cls) div.className = cls;
         div.textContent = text;
         messages.appendChild(div);
-        scrollToBottom();
+        if (stick) {
+          // 等待布局刷新后再贴底，避免被输入区遮挡
+          requestAnimationFrame(() => {
+            scrollToBottom();
+            setTimeout(scrollToBottom, 30);
+          });
+        }
       }
 
       function renderRoster(list) {
@@ -1305,7 +1413,38 @@
         }
       }
 
-      function addMessage(who, text, isMe, color, messageId) {
+      // 移动端双击检测（touchend 两次、同一位置）
+      let lastTap = { ts: 0, mid: null, x: 0, y: 0 };
+      function bindMobileDoubleTap(el, mid, handler) {
+        el.addEventListener('touchend', (e) => {
+          const now = Date.now();
+          const t = e.changedTouches && e.changedTouches[0];
+          const dx = t ? Math.abs(t.clientX - (lastTap.x || 0)) : 0;
+          const dy = t ? Math.abs(t.clientY - (lastTap.y || 0)) : 0;
+          const close = dx < 30 && dy < 30;
+          if (lastTap.mid === mid && close && (now - lastTap.ts) < 300) {
+            try { handler(e); } finally { lastTap = { ts: 0, mid: null, x: 0, y: 0 }; }
+          } else {
+            lastTap = { ts: now, mid, x: t ? t.clientX : 0, y: t ? t.clientY : 0 };
+          }
+        }, { passive: true });
+      }
+
+      // 长按检测（用于移动端回复）
+      function bindLongPress(el, durationMs, onLong) {
+        let timer = null;
+        const start = (e) => {
+          clear();
+          timer = setTimeout(() => { onLong(e); }, durationMs);
+        };
+        const clear = () => { if (timer) { clearTimeout(timer); timer = null; } };
+        el.addEventListener('touchstart', start, { passive: true });
+        el.addEventListener('touchend', clear, { passive: true });
+        el.addEventListener('touchcancel', clear, { passive: true });
+        el.addEventListener('touchmove', clear, { passive: true });
+      }
+
+      function addMessage(who, text, isMe, color, messageId, opts) {
         // 🔧 消息去重：如果提供了消息ID且已显示过，则跳过
         if (messageId) {
           if (displayedMessageIds.has(messageId)) {
@@ -1325,6 +1464,22 @@
 
         const msgDiv = document.createElement('div');
         msgDiv.className = 'msg ' + (isMe ? 'right' : 'left');
+        if (messageId) msgDiv.setAttribute('data-mid', messageId);
+        // 手势：PC 双击点赞（👍），右键设置回复；移动端双击、长按
+        msgDiv.addEventListener('dblclick', (e) => {
+          const mid = messageId; if (!mid) return;
+          sendReaction(mid, '👍');
+        });
+        if (!isTouchDevice) {
+          msgDiv.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            const mid = messageId; if (!mid) return;
+            showReactionPalette(mid, bubble);
+          });
+        }
+        // 移动端支持
+        if (messageId) bindMobileDoubleTap(msgDiv, messageId, () => sendReaction(messageId, '👍'));
+        if (messageId) bindLongPress(msgDiv, 500, () => showReactionPalette(messageId, bubble));
 
         // 昵称放在气泡外面
         if (!isMe) {
@@ -1337,19 +1492,29 @@
         const bubble = document.createElement('div');
         bubble.className = 'bubble';
 
-        // 如果不是自己的消息，应用用户专属颜色
-        if (!isMe && color) {
-          bubble.style.backgroundColor = color;
-          bubble.style.color = textColorForBg(color);
-        }
+        // 统一气泡配色：
+        // - 他人：CSS 已设浅灰底黑字
+        // - 自己：CSS 已设蓝底白字
 
         const textSpan = document.createElement('div');
         textSpan.textContent = text;
         bubble.appendChild(textSpan);
 
         msgDiv.appendChild(bubble);
+        // 引用放在气泡下方，独立一行
+        if (opts && opts.replyTo) {
+          const quote = document.createElement('div');
+          quote.className = 'quote';
+          const qw = messageAuthorById.get(opts.replyTo) || ('#' + opts.replyTo);
+          const qt = messageTextById.get(opts.replyTo) || '';
+          quote.textContent = `${qw}: ${qt ? qt.slice(0, 60) : ''}`;
+          msgDiv.appendChild(quote);
+        }
         messages.appendChild(msgDiv);
         scrollToBottom();
+
+        // 初始渲染反应条（如已有）
+        if (messageId) renderReactionsFor(messageId);
       }
 
       // 邀请按钮
@@ -1402,12 +1567,140 @@
         });
       }
 
+      function tryParseJson(s) {
+        try { return JSON.parse(s); } catch { return null; }
+      }
+
+      async function handleIncomingMessage(m) {
+        // 版本提示
+        if ((m.proto && m.proto !== PROTO_VERSION) || (m.kdf && (m.kdf.iter !== KDF_ITER || m.kdf.saltVer !== KDF_SALT_VER))) {
+          addLine('【系统】检测到不同版本/参数的消息，若无法正常解密，请刷新页面或使用同版本链接', 'system');
+        }
+        const who = m.name ? m.name : `#${m.from}`;
+        const isMe = m.from === clientId;
+        const plaintext = await decryptMessage(m.text);
+        // 尝试解析结构化事件
+        const obj = tryParseJson(plaintext);
+        if (obj && typeof obj === 'object' && obj.kind) {
+          if (obj.kind === 'reaction' && obj.targetId && obj.emoji) {
+            // 反应事件（去重：使用 displayedMessageIds 记录已处理）
+            if (m.id && displayedMessageIds.has(m.id)) return;
+            if (m.id) {
+              displayedMessageIds.add(m.id);
+              displayedMessageIdsArray.push(m.id);
+              if (displayedMessageIdsArray.length > MESSAGE_ID_CACHE_SIZE) {
+                const oldId = displayedMessageIdsArray.shift();
+                displayedMessageIds.delete(oldId);
+              }
+            }
+            applyReaction(m.from, obj.targetId, obj.emoji);
+            return;
+          }
+          if (obj.kind === 'reply' && obj.replyTo && typeof obj.text === 'string') {
+            // 正常渲染消息，带引用 UI
+            addMessage(who, obj.text, isMe, m.color, m.id, { replyTo: obj.replyTo });
+            // 存索引用于后续引用
+            if (m.id) {
+              messageTextById.set(m.id, obj.text);
+              messageAuthorById.set(m.id, who);
+            }
+            return;
+          }
+          // 未识别结构化内容，降级为普通文本
+        }
+        // 普通文本
+        addMessage(who, plaintext, isMe, m.color, m.id);
+        if (m.id) {
+          messageTextById.set(m.id, plaintext);
+          messageAuthorById.set(m.id, who);
+        }
+      }
+
+      function getReactionsFor(mid) {
+        if (!reactions.has(mid)) reactions.set(mid, new Map());
+        return reactions.get(mid);
+      }
+
+      function applyReaction(fromId, targetId, emoji) {
+        const stick = isNearBottom();
+        const perMsg = getReactionsFor(targetId);
+        if (!perMsg.has(emoji)) perMsg.set(emoji, new Set());
+        const set = perMsg.get(emoji);
+        if (set.has(fromId)) set.delete(fromId); else set.add(fromId);
+        renderReactionsFor(targetId);
+        if (stick) setTimeout(scrollToBottom, 0);
+      }
+
+      function renderReactionsFor(mid) {
+        const msgDiv = messages.querySelector(`.msg[data-mid="${mid}"]`);
+        if (!msgDiv) return;
+        const bubble = msgDiv.querySelector('.bubble');
+        if (!bubble) return;
+        let bar = bubble.querySelector('.reactions');
+        const perMsg = reactions.get(mid);
+        // 统计是否有需要展示的反应
+        let hasAny = false;
+        if (perMsg) {
+          for (const set of perMsg.values()) { if (set && set.size > 0) { hasAny = true; break; } }
+        }
+        // 如果没有任何反应，移除已存在的反应条，避免出现空白间距
+        if (!hasAny) {
+          if (bar) bar.remove();
+          return;
+        }
+        // 需要展示时，确保存在容器并填充
+        if (!bar) {
+          bar = document.createElement('div');
+          bar.className = 'reactions';
+          bubble.appendChild(bar);
+        }
+        bar.innerHTML = '';
+        for (const [emoji, set] of perMsg.entries()) {
+          if (!set || set.size === 0) continue;
+          const chip = document.createElement('span');
+          chip.className = 'reaction-chip';
+          chip.textContent = `${emoji} ${set.size}`;
+          bar.appendChild(chip);
+        }
+      }
+
+      async function sendReaction(targetId, emoji) {
+        if (!isWsOpen()) return; // 简化：在线时发送
+        const payload = { kind: 'reaction', targetId, emoji };
+        const ciphertext = await encryptMessage(JSON.stringify(payload));
+        const out = { type: 'text', text: ciphertext, name: nameEl.value.trim() || undefined, proto: PROTO_VERSION, kdf: { saltVer: KDF_SALT_VER, iter: KDF_ITER } };
+        ws.send(JSON.stringify(out));
+      }
+
+      function setReply(targetId) {
+        currentReplyTo = targetId;
+        replyWhoEl.textContent = messageAuthorById.get(targetId) || ('#' + targetId);
+        replyPreviewEl.textContent = (messageTextById.get(targetId) || '').slice(0, 40);
+        replyBar.style.display = 'flex';
+        // 自动聚焦输入框并滚动到底部（不再依赖是否靠近底部）
+        setTimeout(() => { try { input.focus({ preventScroll: true }); } catch (_) {} }, 0);
+        requestAnimationFrame(() => {
+          scrollToBottom();
+          setTimeout(scrollToBottom, 30);
+        });
+      }
+      function clearReply() {
+        currentReplyTo = null;
+        replyBar.style.display = 'none';
+        replyWhoEl.textContent = '';
+        replyPreviewEl.textContent = '';
+        // 隐藏后也保持吸底体验
+        requestAnimationFrame(() => { if (isNearBottom(200)) scrollToBottom(); });
+      }
+      replyCancelBtn.addEventListener('click', clearReply);
+
       async function sendMessage(){
         const text = input.value.trim();
         if (!text) return;
         if (!isWsOpen()) {
           // 离线：将消息加密后加入待发送队列，并尝试重连
-          const ciphertext = await encryptMessage(text);
+          const plain = currentReplyTo ? JSON.stringify({ kind: 'reply', replyTo: currentReplyTo, text }) : text;
+          const ciphertext = await encryptMessage(plain);
           const payload = { type: 'text', text: ciphertext, name: nameEl.value.trim() || undefined, proto: PROTO_VERSION, kdf: { saltVer: KDF_SALT_VER, iter: KDF_ITER } };
           sendQueue.push({ roomId: currentRoomId, payload });
           addLine(`离线，已加入待发送队列（${sendQueue.length}）`, 'system');
@@ -1419,15 +1712,69 @@
           setTimeout(scrollToBottom, 50);
           return;
         }
-        const ciphertext = await encryptMessage(text);
+        const plain = currentReplyTo ? JSON.stringify({ kind: 'reply', replyTo: currentReplyTo, text }) : text;
+        const ciphertext = await encryptMessage(plain);
         const payload = { type: 'text', text: ciphertext, name: nameEl.value.trim() || undefined, proto: PROTO_VERSION, kdf: { saltVer: KDF_SALT_VER, iter: KDF_ITER } };
         ws.send(JSON.stringify(payload));
         input.value = '';
+        if (currentReplyTo) clearReply();
         // 保持输入聚焦（仅当确实失焦时）
         if (document.activeElement !== input) {
           input.focus({ preventScroll: true });
         }
         setTimeout(scrollToBottom, 50);
+      }
+
+      // 反应选择面板（长按打开，不与“回复”混淆；在面板内有“回复”按钮）
+      function ensureReactionPalette() {
+        if (reactionPalette) return reactionPalette;
+        const div = document.createElement('div');
+        div.className = 'react-palette';
+        const emojis = ['👍','❤️','😂','🎉','😮','😢'];
+        for (const e of emojis) {
+          const btn = document.createElement('button');
+          btn.className = 'react-btn';
+          btn.textContent = e;
+          btn.addEventListener('click', () => { if (paletteForMid) sendReaction(paletteForMid, e); hideReactionPalette(); });
+          div.appendChild(btn);
+        }
+        const sep = document.createElement('div'); sep.className = 'react-divider'; div.appendChild(sep);
+        const replyBtn = document.createElement('button');
+        replyBtn.className = 'react-action';
+        replyBtn.textContent = '回复';
+        replyBtn.addEventListener('click', () => { if (paletteForMid) setReply(paletteForMid); hideReactionPalette(); });
+        div.appendChild(replyBtn);
+        document.body.appendChild(div);
+        reactionPalette = div;
+        // 点击外部关闭
+        document.addEventListener('click', (e) => {
+          if (!reactionPalette || reactionPalette.style.display !== 'flex') return;
+          if (reactionPalette.contains(e.target)) return;
+          hideReactionPalette();
+        }, true);
+        window.addEventListener('scroll', hideReactionPalette, { passive: true });
+        window.addEventListener('resize', hideReactionPalette);
+        return reactionPalette;
+      }
+
+      function showReactionPalette(mid, anchorEl) {
+        const el = ensureReactionPalette();
+        paletteForMid = mid;
+        const rect = anchorEl.getBoundingClientRect();
+        const paletteW = 36*6 + 6*5 + 10*2 + 12 + 50; // 估算
+        el.style.display = 'flex';
+        // 优先显示在气泡上方；若空间不足则显示在下方
+        const topPreferred = rect.top - 52; // 约 52px 高度
+        const top = topPreferred > 8 ? topPreferred : (rect.bottom + 8);
+        let left = rect.left + (rect.width/2) - (paletteW/2);
+        left = Math.max(8, Math.min(left, window.innerWidth - (paletteW + 8)));
+        el.style.top = top + 'px';
+        el.style.left = left + 'px';
+      }
+
+      function hideReactionPalette() {
+        if (reactionPalette) reactionPalette.style.display = 'none';
+        paletteForMid = null;
       }
 
       // 禁用表单默认提交，改为手动发送
