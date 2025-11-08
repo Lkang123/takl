@@ -822,6 +822,7 @@
       }
 
       const store = window.localStorage;
+      const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
       let clientId = store.getItem('clientId');
       if (!clientId) {
         clientId = (Math.random().toString(36).slice(2, 10) + Date.now().toString(36)).slice(0, 12);
@@ -1440,11 +1441,13 @@
           const mid = messageId; if (!mid) return;
           sendReaction(mid, '👍');
         });
-        msgDiv.addEventListener('contextmenu', (e) => {
-          e.preventDefault();
-          const mid = messageId; if (!mid) return;
-          setReply(mid);
-        });
+        if (!isTouchDevice) {
+          msgDiv.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            const mid = messageId; if (!mid) return;
+            setReply(mid);
+          });
+        }
         // 移动端支持
         if (messageId) bindMobileDoubleTap(msgDiv, messageId, () => sendReaction(messageId, '👍'));
         if (messageId) bindLongPress(msgDiv, 500, () => showReactionPalette(messageId, bubble));
