@@ -533,9 +533,9 @@
       #messages .msg { -webkit-user-select: none; user-select: none; }
 
       #messages .msg.left .bubble {
-        /* 统一样式：他人气泡为浅灰底、黑字 */
-        background: #f2f2f7;
-        color: #000;
+        /* 他人气泡：深灰底、白字（更接近你截圖的风格） */
+        background: #2c2c2e; /* iOS 深色系统灰 */
+        color: #fff;
         border-bottom-left-radius: 4px;
       }
 
@@ -577,7 +577,7 @@
 
       /* 引用块 */
       .quote {
-        /* 独立于气泡的回复条：单独一行，不嵌入气泡 */
+        /* 独立于气泡的回复条：单独一行，不嵌入气泡（基础浅灰，左右侧再覆盖） */
         font-size: 12px;
         color: #3c3c43;
         padding: 6px 10px;
@@ -586,6 +586,17 @@
         background: #e5e5ea;
         border-radius: 10px;
         max-width: 75%;
+      }
+      /* 左侧（他人）引用条：深灰底 + 浅灰字，更贴近截图 */
+      #messages .msg.left .quote {
+        background: #3a3a3c;
+        color: #c7c7cc;
+      }
+      /* 右侧（自己）引用条：在蓝底旁保持白字半透明底 */
+      #messages .msg.right .quote {
+        background: rgba(255,255,255,0.22);
+        color: #fff;
+        font-weight: 500;
       }
 
       /* 反应条 */
