@@ -954,8 +954,11 @@
         // 如果 URL 房间与 localStorage 不同，清除旧房间记录
         if (savedRoom && savedRoom !== urlRoom) {
           store.removeItem('currentRoom');
-          console.log(`[房间切换] 从 ${savedRoom} 切换到 ${urlRoom}`);
         }
+
+        // 🔧 重要：清除 URL 参数，防止刷新时重复使用
+        window.history.replaceState({}, document.title, window.location.pathname);
+
         roomPasswordEl.value = urlRoom;
         statusEl.style.display = 'flex';
         statusEl.textContent = '正在连接…';
@@ -1035,6 +1038,7 @@
           name: nameEl.value || '',
           room: roomId
         }).toString();
+
         ws = new WebSocket(`${proto}://${location.host}/?${qs}`);
 
         ws.onopen = () => {
