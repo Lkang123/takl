@@ -465,6 +465,8 @@
         flex-direction: column;
         gap: 10px;
         -webkit-overflow-scrolling: touch;
+        /* 移动端：减少双击缩放干扰与300ms延迟 */
+        touch-action: manipulation;
       }
 
       /* 系统消息 - 缩小占比 */
@@ -527,6 +529,8 @@
         font-size: 16px;
         position: relative;
       }
+      /* 避免长按选择影响长按手势 */
+      #messages .msg { -webkit-user-select: none; user-select: none; }
 
       #messages .msg.left .bubble {
         /* 背景色将由 JavaScript 动态设置 */
@@ -1356,6 +1360,37 @@
         }
       }
 
+      // 移动端双击检测（touchend 两次、同一位置）
+      let lastTap = { ts: 0, mid: null, x: 0, y: 0 };
+      function bindMobileDoubleTap(el, mid, handler) {
+        el.addEventListener('touchend', (e) => {
+          const now = Date.now();
+          const t = e.changedTouches && e.changedTouches[0];
+          const dx = t ? Math.abs(t.clientX - (lastTap.x || 0)) : 0;
+          const dy = t ? Math.abs(t.clientY - (lastTap.y || 0)) : 0;
+          const close = dx < 30 && dy < 30;
+          if (lastTap.mid === mid && close && (now - lastTap.ts) < 300) {
+            try { handler(e); } finally { lastTap = { ts: 0, mid: null, x: 0, y: 0 }; }
+          } else {
+            lastTap = { ts: now, mid, x: t ? t.clientX : 0, y: t ? t.clientY : 0 };
+          }
+        }, { passive: true });
+      }
+
+      // 长按检测（用于移动端回复）
+      function bindLongPress(el, durationMs, onLong) {
+        let timer = null;
+        const start = (e) => {
+          clear();
+          timer = setTimeout(() => { onLong(e); }, durationMs);
+        };
+        const clear = () => { if (timer) { clearTimeout(timer); timer = null; } };
+        el.addEventListener('touchstart', start, { passive: true });
+        el.addEventListener('touchend', clear, { passive: true });
+        el.addEventListener('touchcancel', clear, { passive: true });
+        el.addEventListener('touchmove', clear, { passive: true });
+      }
+
       function addMessage(who, text, isMe, color, messageId, opts) {
         // 🔧 消息去重：如果提供了消息ID且已显示过，则跳过
         if (messageId) {
@@ -1377,7 +1412,7 @@
         const msgDiv = document.createElement('div');
         msgDiv.className = 'msg ' + (isMe ? 'right' : 'left');
         if (messageId) msgDiv.setAttribute('data-mid', messageId);
-        // 手势：双击点赞（👍），右键设置回复
+        // 手势：PC 双击点赞（👍），右键设置回复；移动端双击、长按
         msgDiv.addEventListener('dblclick', (e) => {
           const mid = messageId; if (!mid) return;
           sendReaction(mid, '👍');
@@ -1387,6 +1422,9 @@
           const mid = messageId; if (!mid) return;
           setReply(mid);
         });
+        // 移动端支持
+        if (messageId) bindMobileDoubleTap(msgDiv, messageId, () => sendReaction(messageId, '👍'));
+        if (messageId) bindLongPress(msgDiv, 500, () => setReply(messageId));
 
         // 昵称放在气泡外面
         if (!isMe) {
@@ -1545,14 +1583,24 @@
         const bubble = msgDiv.querySelector('.bubble');
         if (!bubble) return;
         let bar = bubble.querySelector('.reactions');
+        const perMsg = reactions.get(mid);
+        // 统计是否有需要展示的反应
+        let hasAny = false;
+        if (perMsg) {
+          for (const set of perMsg.values()) { if (set && set.size > 0) { hasAny = true; break; } }
+        }
+        // 如果没有任何反应，移除已存在的反应条，避免出现空白间距
+        if (!hasAny) {
+          if (bar) bar.remove();
+          return;
+        }
+        // 需要展示时，确保存在容器并填充
         if (!bar) {
           bar = document.createElement('div');
           bar.className = 'reactions';
           bubble.appendChild(bar);
         }
         bar.innerHTML = '';
-        const perMsg = reactions.get(mid);
-        if (!perMsg) return;
         for (const [emoji, set] of perMsg.entries()) {
           if (!set || set.size === 0) continue;
           const chip = document.createElement('span');
