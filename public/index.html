@@ -540,7 +540,8 @@
       }
 
       #messages .msg.right .bubble {
-        background: #007aff;
+        /* 降低饱和度的蓝色，更柔和 */
+        background: #4da3ff;
         color: #fff;
         border-bottom-right-radius: 4px;
       }
@@ -576,18 +577,15 @@
 
       /* 引用块 */
       .quote {
+        /* 独立于气泡的回复条：单独一行，不嵌入气泡 */
         font-size: 12px;
-        color: #8e8e93;
-        padding: 4px 8px;
-        margin-bottom: 6px;
-        background: rgba(0,0,0,0.04);
-        border-radius: 8px;
-      }
-      /* 右侧（自己）气泡中的引用：提高对比度 */
-      #messages .msg.right .quote {
-        background: rgba(255,255,255,0.22);
-        color: #fff;
-        font-weight: 500;
+        color: #3c3c43;
+        padding: 6px 10px;
+        margin-top: 6px;
+        margin-bottom: 0;
+        background: #e5e5ea;
+        border-radius: 10px;
+        max-width: 75%;
       }
 
       /* 反应条 */
@@ -1486,21 +1484,20 @@
         // - 他人：CSS 已设浅灰底黑字
         // - 自己：CSS 已设蓝底白字
 
-        // 引用（回复）
-        if (opts && opts.replyTo) {
-          const quote = document.createElement('div');
-          quote.className = 'quote';
-          const qw = messageAuthorById.get(opts.replyTo) || ('#' + opts.replyTo);
-          const qt = messageTextById.get(opts.replyTo) || '';
-          quote.textContent = `回复 ${qw}: ${qt ? qt.slice(0, 40) : ''}`;
-          bubble.appendChild(quote);
-        }
-
         const textSpan = document.createElement('div');
         textSpan.textContent = text;
         bubble.appendChild(textSpan);
 
         msgDiv.appendChild(bubble);
+        // 引用放在气泡下方，独立一行
+        if (opts && opts.replyTo) {
+          const quote = document.createElement('div');
+          quote.className = 'quote';
+          const qw = messageAuthorById.get(opts.replyTo) || ('#' + opts.replyTo);
+          const qt = messageTextById.get(opts.replyTo) || '';
+          quote.textContent = `回复 ${qw}: ${qt ? qt.slice(0, 60) : ''}`;
+          msgDiv.appendChild(quote);
+        }
         messages.appendChild(msgDiv);
         scrollToBottom();
 
