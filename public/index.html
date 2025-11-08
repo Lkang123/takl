@@ -834,6 +834,11 @@
         messages.scrollTop = messages.scrollHeight;
       }
 
+      function isNearBottom(threshold = 80) {
+        const dist = messages.scrollHeight - messages.scrollTop - messages.clientHeight;
+        return dist <= threshold;
+      }
+
       // 输入框获得焦点时，自动滚到最底部（配合移动端软键盘）
       input.addEventListener('focus', () => {
         // 多次尝试滚动，因为键盘弹出有延迟
@@ -1596,11 +1601,13 @@
       }
 
       function applyReaction(fromId, targetId, emoji) {
+        const stick = isNearBottom();
         const perMsg = getReactionsFor(targetId);
         if (!perMsg.has(emoji)) perMsg.set(emoji, new Set());
         const set = perMsg.get(emoji);
         if (set.has(fromId)) set.delete(fromId); else set.add(fromId);
         renderReactionsFor(targetId);
+        if (stick) setTimeout(scrollToBottom, 0);
       }
 
       function renderReactionsFor(mid) {
