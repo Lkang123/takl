@@ -601,6 +601,26 @@
         color: #3c3c43;
       }
 
+      /* 反应选择面板（移动端长按） */
+      .react-palette {
+        position: fixed;
+        z-index: 9999;
+        background: #fff;
+        border-radius: 12px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+        padding: 8px 10px;
+        display: none;
+        align-items: center;
+        gap: 6px;
+      }
+      .react-btn {
+        width: 36px; height: 36px; border-radius: 18px;
+        display: inline-flex; align-items: center; justify-content: center;
+        font-size: 20px; background: #f2f2f7; border: none; cursor: pointer;
+      }
+      .react-divider { width: 1px; height: 24px; background: rgba(0,0,0,0.08); margin: 0 6px; }
+      .react-action { font-size: 14px; color: #007aff; background: transparent; border: none; padding: 6px 8px; border-radius: 8px; }
+
       #input {
         flex: 1 1 auto;
         min-height: 36px;
@@ -775,6 +795,9 @@
       const replyWhoEl = document.getElementById('replyWho');
       const replyPreviewEl = document.getElementById('replyPreview');
       const replyCancelBtn = document.getElementById('replyCancel');
+      // 全局反应面板
+      let reactionPalette = null;
+      let paletteForMid = null;
       const form = document.getElementById('form');
       const input = document.getElementById('input');
       const nameEl = document.getElementById('name');
@@ -1424,7 +1447,7 @@
         });
         // 移动端支持
         if (messageId) bindMobileDoubleTap(msgDiv, messageId, () => sendReaction(messageId, '👍'));
-        if (messageId) bindLongPress(msgDiv, 500, () => setReply(messageId));
+        if (messageId) bindLongPress(msgDiv, 500, () => showReactionPalette(messageId, bubble));
 
         // 昵称放在气泡外面
         if (!isMe) {
@@ -1661,6 +1684,58 @@
           input.focus({ preventScroll: true });
         }
         setTimeout(scrollToBottom, 50);
+      }
+
+      // 反应选择面板（长按打开，不与“回复”混淆；在面板内有“回复”按钮）
+      function ensureReactionPalette() {
+        if (reactionPalette) return reactionPalette;
+        const div = document.createElement('div');
+        div.className = 'react-palette';
+        const emojis = ['👍','❤️','😂','🎉','😮','😢'];
+        for (const e of emojis) {
+          const btn = document.createElement('button');
+          btn.className = 'react-btn';
+          btn.textContent = e;
+          btn.addEventListener('click', () => { if (paletteForMid) sendReaction(paletteForMid, e); hideReactionPalette(); });
+          div.appendChild(btn);
+        }
+        const sep = document.createElement('div'); sep.className = 'react-divider'; div.appendChild(sep);
+        const replyBtn = document.createElement('button');
+        replyBtn.className = 'react-action';
+        replyBtn.textContent = '回复';
+        replyBtn.addEventListener('click', () => { if (paletteForMid) setReply(paletteForMid); hideReactionPalette(); });
+        div.appendChild(replyBtn);
+        document.body.appendChild(div);
+        reactionPalette = div;
+        // 点击外部关闭
+        document.addEventListener('click', (e) => {
+          if (!reactionPalette || reactionPalette.style.display !== 'flex') return;
+          if (reactionPalette.contains(e.target)) return;
+          hideReactionPalette();
+        }, true);
+        window.addEventListener('scroll', hideReactionPalette, { passive: true });
+        window.addEventListener('resize', hideReactionPalette);
+        return reactionPalette;
+      }
+
+      function showReactionPalette(mid, anchorEl) {
+        const el = ensureReactionPalette();
+        paletteForMid = mid;
+        const rect = anchorEl.getBoundingClientRect();
+        const paletteW = 36*6 + 6*5 + 10*2 + 12 + 50; // 估算
+        el.style.display = 'flex';
+        // 优先显示在气泡上方；若空间不足则显示在下方
+        const topPreferred = rect.top - 52; // 约 52px 高度
+        const top = topPreferred > 8 ? topPreferred : (rect.bottom + 8);
+        let left = rect.left + (rect.width/2) - (paletteW/2);
+        left = Math.max(8, Math.min(left, window.innerWidth - (paletteW + 8)));
+        el.style.top = top + 'px';
+        el.style.left = left + 'px';
+      }
+
+      function hideReactionPalette() {
+        if (reactionPalette) reactionPalette.style.display = 'none';
+        paletteForMid = null;
       }
 
       // 禁用表单默认提交，改为手动发送
