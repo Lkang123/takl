@@ -1445,7 +1445,7 @@
           msgDiv.addEventListener('contextmenu', (e) => {
             e.preventDefault();
             const mid = messageId; if (!mid) return;
-            setReply(mid);
+            showReactionPalette(mid, bubble);
           });
         }
         // 移动端支持
