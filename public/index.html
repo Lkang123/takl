@@ -1315,6 +1315,7 @@
       }
 
       function addLine(text, cls) {
+        const stick = isNearBottom();
         // 系统消息去重逻辑
         if (cls === 'system') {
           const now = Date.now();
@@ -1340,7 +1341,13 @@
         if (cls) div.className = cls;
         div.textContent = text;
         messages.appendChild(div);
-        scrollToBottom();
+        if (stick) {
+          // 等待布局刷新后再贴底，避免被输入区遮挡
+          requestAnimationFrame(() => {
+            scrollToBottom();
+            setTimeout(scrollToBottom, 30);
+          });
+        }
       }
 
       function renderRoster(list) {
