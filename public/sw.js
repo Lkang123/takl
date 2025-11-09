@@ -26,6 +26,13 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
+  // 仅处理 http/https，同源请求，避免 chrome-extension 等协议报错
+  try {
+    const url = new URL(req.url);
+    if (!(url.protocol === 'http:' || url.protocol === 'https:')) return;
+    const sameOrigin = url.origin === self.location.origin;
+    if (!sameOrigin) return;
+  } catch (_) { return; }
 
   const isHTML = req.destination === 'document' || (req.headers.get('accept') || '').includes('text/html');
 

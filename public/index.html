@@ -814,6 +814,8 @@
       const replyPreviewEl = document.getElementById('replyPreview');
       const replyCancelBtn = document.getElementById('replyCancel');
       const saveNameBtn = document.getElementById('saveNameBtn');
+      // 本地存储引用需先初始化
+      const store = window.localStorage;
       // 本地记录下一次可改名时间戳（毫秒）
       let nameNextAt = parseInt(store.getItem('nameNextAt') || '0', 10) || 0;
       // 全局反应面板
@@ -842,7 +844,7 @@
         }, { passive: false });
       }
 
-      const store = window.localStorage;
+      // store 已前置
       const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
       let clientId = store.getItem('clientId');
       if (!clientId) {
