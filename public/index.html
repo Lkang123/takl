@@ -814,6 +814,8 @@
       const replyPreviewEl = document.getElementById('replyPreview');
       const replyCancelBtn = document.getElementById('replyCancel');
       const saveNameBtn = document.getElementById('saveNameBtn');
+      // 本地记录下一次可改名时间戳（毫秒）
+      let nameNextAt = parseInt(store.getItem('nameNextAt') || '0', 10) || 0;
       // 全局反应面板
       let reactionPalette = null;
       let paletteForMid = null;
@@ -900,6 +902,13 @@
       });
 
       // 昵称变更：仅在“确认”时上报（失焦或回车），避免系统消息过早
+      function msToHHMM(ms){
+        const sec = Math.max(0, Math.floor(ms/1000));
+        const h = Math.floor(sec/3600);
+        const m = Math.floor((sec%3600)/60);
+        return `${h}小时${m}分钟`;
+      }
+
       function sendNameUpdateNow(){
         if (!isWsOpen()) return;
         const newName = nameEl.value.trim();
@@ -908,6 +917,11 @@
       if (saveNameBtn) {
         saveNameBtn.addEventListener('click', (e) => {
           e.preventDefault();
+          const now = Date.now();
+          if (now < nameNextAt) {
+            addLine(`【系统】今日已修改过昵称，剩余 ${msToHHMM(nameNextAt - now)} 后可再修改`, 'system');
+            return;
+          }
           sendNameUpdateNow();
           // 聚焦输入框方便继续修改（如果被拒绝也能立刻看到）
           setTimeout(() => { try { nameEl.focus({ preventScroll: true }); } catch {} }, 0);
@@ -1281,6 +1295,7 @@
               return;
             }
             if (m.type === 'nameOk') {
+              if (m.nextAt) { nameNextAt = m.nextAt; store.setItem('nameNextAt', String(m.nextAt)); }
               addLine('【系统】昵称已更新', 'system');
               return;
             }
