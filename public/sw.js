@@ -1,5 +1,5 @@
 /* Simple PWA service worker for Whisper Chat */
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v2';
 const CACHE_NAME = `whisper-${CACHE_VERSION}`;
 const STATIC_ASSETS = [
   '/',
@@ -57,4 +57,3 @@ async function staleWhileRevalidate(req) {
   }).catch(() => null);
   return cached || network || new Response('', { status: 204 });
 }
-
