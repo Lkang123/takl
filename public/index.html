@@ -764,6 +764,7 @@
         <div class="name-bar">
           <label>昵称</label>
           <input id="name" type="text" placeholder="你的昵称" autocomplete="off" />
+          <button id="saveNameBtn" class="secondary">确认</button>
           <button id="inviteBtn">邀请</button>
         </div>
         <div id="roster" class="roster-bar"></div>
@@ -812,6 +813,7 @@
       const replyWhoEl = document.getElementById('replyWho');
       const replyPreviewEl = document.getElementById('replyPreview');
       const replyCancelBtn = document.getElementById('replyCancel');
+      const saveNameBtn = document.getElementById('saveNameBtn');
       // 全局反应面板
       let reactionPalette = null;
       let paletteForMid = null;
@@ -903,14 +905,14 @@
         const newName = nameEl.value.trim();
         try { ws.send(JSON.stringify({ type: 'updateName', name: newName })); } catch {}
       }
-      nameEl.addEventListener('blur', sendNameUpdateNow);
-      nameEl.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
+      if (saveNameBtn) {
+        saveNameBtn.addEventListener('click', (e) => {
           e.preventDefault();
-          nameEl.blur();
           sendNameUpdateNow();
-        }
-      });
+          // 聚焦输入框方便继续修改（如果被拒绝也能立刻看到）
+          setTimeout(() => { try { nameEl.focus({ preventScroll: true }); } catch {} }, 0);
+        });
+      }
 
       let ws = null;
       let encryptionKey = null; // 加密密钥
@@ -1272,6 +1274,14 @@
               authStatusEl.textContent = m.text;
               authStatusEl.style.color = '#ff3b30';
               store.removeItem('currentRoom');
+              return;
+            }
+            if (m.type === 'nameError') {
+              addLine(`【系统】${m.text || '昵称修改受限'}`, 'system');
+              return;
+            }
+            if (m.type === 'nameOk') {
+              addLine('【系统】昵称已更新', 'system');
               return;
             }
             if (m.type === 'userCount') {

@@ -109,6 +109,9 @@ const DISSOLVE_BLOCK_MS = 12 * 60 * 60 * 1000;
 // 昵称变更公告开关与冷却
 const RENAME_ANNOUNCE = process.env.RENAME_ANNOUNCE !== '0';
 const RENAME_COOLDOWN_MS = parseInt(process.env.RENAME_COOLDOWN_MS || '30000', 10) | 0;
+// 昵称变更频率限制：同一用户 24 小时内仅允许修改一次
+const RENAME_LIMIT_MS = 24 * 60 * 60 * 1000;
+const renameNextAllowed = new Map(); // userId -> timestamp(ms)
 
 // 获取或创建房间
 function getRoom(roomId, ownerId = null) {
@@ -355,22 +358,36 @@ wss.on('connection', (ws, req) => {
       rate.tokens -= 1;
     }
 
-    // 处理昵称更新
+    // 处理昵称更新（限制：24h 仅一次）
     if (payload.type === 'updateName') {
       if (payload && typeof payload.name === 'string') {
         const now2 = Date.now();
+        const nextAllowed = renameNextAllowed.get(ws.id) || 0;
+        if (now2 < nextAllowed) {
+          const remain = nextAllowed - now2;
+          try { ws.send(JSON.stringify({ type: 'nameError', text: `今日已修改过昵称，请稍后再试`, remainMs: remain })); } catch {}
+          return;
+        }
         const newName = payload.name.trim().slice(0, 32);
+        if (!newName) {
+          try { ws.send(JSON.stringify({ type: 'nameError', text: '昵称不能为空' })); } catch {}
+          return;
+        }
         const oldDisplay = ws.name ? ws.name : ws.id;
-        ws.name = newName || undefined;
-        const newDisplay = ws.name ? ws.name : ws.id;
+        ws.name = newName;
+        const newDisplay = ws.name;
         broadcastRoomRoster(ws.roomId);
-        // 可选公告：限冷却且确实发生变化
+        // 公告（带冷却）
         if (RENAME_ANNOUNCE && oldDisplay !== newDisplay) {
           if (!ws._lastRenameAnnounceAt || (now2 - ws._lastRenameAnnounceAt) > RENAME_COOLDOWN_MS) {
             broadcastToRoom(ws.roomId, { type: 'system', text: `${oldDisplay} 修改昵称为 ${newDisplay}`, at: Date.now() }, null);
             ws._lastRenameAnnounceAt = now2;
           }
         }
+        // 设置 24h 限制
+        const nextAt = now2 + RENAME_LIMIT_MS;
+        renameNextAllowed.set(ws.id, nextAt);
+        try { ws.send(JSON.stringify({ type: 'nameOk', nextAt })); } catch {}
       }
       return;
     }
