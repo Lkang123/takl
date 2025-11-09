@@ -897,16 +897,19 @@
         store.setItem('name', nameEl.value);
       });
 
-      // 昵称变更：轻度防抖，上报给服务器以更新成员列表
-      let nameUpdateTimer = null;
-      nameEl.addEventListener('input', () => {
-        if (nameUpdateTimer) clearTimeout(nameUpdateTimer);
-        nameUpdateTimer = setTimeout(() => {
-          if (isWsOpen()) {
-            const newName = nameEl.value.trim();
-            try { ws.send(JSON.stringify({ type: 'updateName', name: newName })); } catch {}
-          }
-        }, 300);
+      // 昵称变更：仅在“确认”时上报（失焦或回车），避免系统消息过早
+      function sendNameUpdateNow(){
+        if (!isWsOpen()) return;
+        const newName = nameEl.value.trim();
+        try { ws.send(JSON.stringify({ type: 'updateName', name: newName })); } catch {}
+      }
+      nameEl.addEventListener('blur', sendNameUpdateNow);
+      nameEl.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          nameEl.blur();
+          sendNameUpdateNow();
+        }
       });
 
       let ws = null;
