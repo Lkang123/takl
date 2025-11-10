@@ -519,14 +519,14 @@
 
       /* 消息气泡 */
       #messages .msg .bubble {
-        max-width: 75%;
-        min-width: 48px;
-        padding: 10px 14px;
-        border-radius: 18px;
+        max-width: 72%;
+        min-width: 44px;
+        padding: 8px 12px;
+        border-radius: 16px;
         word-wrap: break-word;
         word-break: break-word;
-        line-height: 1.42;
-        font-size: 16px;
+        line-height: 1.38;
+        font-size: 15px;
         position: relative;
       }
       /* 避免长按选择影响长按手势 */
@@ -704,7 +704,7 @@
         header .subtitle { font-size: 11px; }
         .name-bar { padding: 8px 12px; }
         #messages { padding: 12px; gap: 8px; }
-        #messages .msg .bubble { max-width: 82%; font-size: 15px; padding: 9px 12px; }
+        #messages .msg .bubble { max-width: 80%; font-size: 14px; padding: 8px 10px; border-radius: 14px; }
         form { padding: 8px 12px; padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
       }
     </style>
@@ -821,6 +821,28 @@
       // 全局反应面板
       let reactionPalette = null;
       let paletteForMid = null;
+      const originalTitle = document.title;
+      let unreadCount = 0;
+      let isLoadingHistory = false;
+      const badgeApi = (() => {
+        if (typeof navigator === 'undefined') return null;
+        const set = navigator.setAppBadge || navigator.setExperimentalAppBadge || navigator.setClientBadge;
+        const clear = navigator.clearAppBadge || navigator.clearExperimentalAppBadge || navigator.clearClientBadge;
+        if (!set) return null;
+        const run = (fn, arg) => {
+          if (typeof fn !== 'function') return;
+          try {
+            const result = fn.call(navigator, arg);
+            if (result && typeof result.catch === 'function') {
+              result.catch(() => {});
+            }
+          } catch (_) {}
+        };
+        return {
+          set(count) { run(set, count); },
+          clear() { clear ? run(clear) : run(set, 0); }
+        };
+      })();
       const form = document.getElementById('form');
       const input = document.getElementById('input');
       const nameEl = document.getElementById('name');
@@ -860,6 +882,69 @@
       function isNearBottom(threshold = 80) {
         const dist = messages.scrollHeight - messages.scrollTop - messages.clientHeight;
         return dist <= threshold;
+      }
+
+      function syncAppBadge() {
+        if (!badgeApi) return;
+        if (unreadCount > 0) {
+          badgeApi.set(unreadCount);
+        } else {
+          badgeApi.clear();
+        }
+      }
+
+      function updateDocumentTitle() {
+        document.title = unreadCount > 0 ? `(${unreadCount}) ${originalTitle}` : originalTitle;
+        syncAppBadge();
+      }
+
+      function markUnread(from, text) {
+        const isVisibleAndFocused = document.visibilityState === 'visible' && document.hasFocus();
+        if (isVisibleAndFocused && isNearBottom(120)) {
+          return;
+        }
+        unreadCount = Math.min(unreadCount + 1, 99);
+        updateDocumentTitle();
+        const shouldNotify = !isVisibleAndFocused;
+        if (shouldNotify) {
+          if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+            try { navigator.vibrate(20); } catch (_) {}
+          }
+        }
+      }
+
+      function resetUnreadCounters(force = false) {
+        if (unreadCount === 0) return;
+        if (!force) {
+          if (document.visibilityState !== 'visible') return;
+          if (!document.hasFocus()) return;
+          if (!isNearBottom(120)) return;
+        }
+        unreadCount = 0;
+        updateDocumentTitle();
+      }
+
+      function handleMessageReminder(who, previewText, isSelf) {
+        if (isLoadingHistory) return;
+        if (isSelf) {
+          setTimeout(() => resetUnreadCounters(false), 0);
+          return;
+        }
+        markUnread(who, previewText);
+      }
+
+      updateDocumentTitle();
+
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          setTimeout(() => resetUnreadCounters(false), 60);
+        }
+      });
+      window.addEventListener('focus', () => {
+        setTimeout(() => resetUnreadCounters(false), 0);
+      });
+      if (messages) {
+        messages.addEventListener('scroll', () => resetUnreadCounters(false));
       }
 
       // 输入框获得焦点时，自动滚到最底部（配合移动端软键盘）
@@ -1320,10 +1405,16 @@
               // 加载历史消息
               if (m.messages && m.messages.length > 0) {
                 addLine('--- 历史消息 ---', 'system');
-                for (const msg of m.messages) {
-                  await handleIncomingMessage(msg);
+                isLoadingHistory = true;
+                try {
+                  for (const msg of m.messages) {
+                    await handleIncomingMessage(msg);
+                  }
+                } finally {
+                  isLoadingHistory = false;
                 }
                 addLine('--- 以上是历史消息 ---', 'system');
+                resetUnreadCounters(true);
               }
               return;
             }
@@ -1634,6 +1725,7 @@
               messageTextById.set(m.id, obj.text);
               messageAuthorById.set(m.id, who);
             }
+            handleMessageReminder(who, obj.text, isMe);
             return;
           }
           // 未识别结构化内容，降级为普通文本
@@ -1644,6 +1736,7 @@
           messageTextById.set(m.id, plaintext);
           messageAuthorById.set(m.id, who);
         }
+        handleMessageReminder(who, plaintext, isMe);
       }
 
       function getReactionsFor(mid) {
