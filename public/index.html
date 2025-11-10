@@ -707,6 +707,75 @@
         #messages .msg .bubble { max-width: 78%; font-size: 12px; padding: 6px 9px; border-radius: 12px; }
         form { padding: 8px 12px; padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
       }
+
+      /* 主题切换按钮 */
+      header .theme-toggle {
+        padding: 6px 8px;
+        border: none;
+        border-radius: 6px;
+        background: transparent;
+        color: #8e8e93;
+        cursor: pointer;
+        line-height: 1;
+      }
+      header .theme-toggle:hover { background: rgba(0,0,0,0.06); }
+
+      /* 暗黑主题覆盖（加在文档根上：.theme-dark） */
+      .theme-dark #app { background: #000; }
+      .theme-dark header {
+        background: rgba(28,28,30,0.9);
+        border-bottom-color: rgba(255,255,255,0.08);
+      }
+      .theme-dark header h1 { color: #fff; }
+      .theme-dark header .subtitle { color: #8e8e93; }
+      .theme-dark header .user-count { color: #8e8e93; }
+      .theme-dark header .status-indicator { color: #30d158; }
+      .theme-dark header .status-indicator::before { background: #30d158; }
+      .theme-dark header .theme-toggle:hover { background: rgba(255,255,255,0.08); }
+
+      .theme-dark #auth { background: #000; }
+      .theme-dark #auth .title { color: #fff; }
+      .theme-dark #auth .description { color: #b0b0b0; }
+      .theme-dark #auth label { color: #fff; }
+      .theme-dark #auth input { background: #2c2c2e; color: #fff; }
+      .theme-dark #auth input::placeholder { color: #8e8e93; }
+      .theme-dark #auth button.secondary { background: #2c2c2e; color: #0a84ff; }
+      .theme-dark #auth .divider { color: #8e8e93; }
+      .theme-dark #auth .room-info { background: #1c1c1e; color: #b0b0b0; }
+      .theme-dark #auth .room-info strong { color: #fff; }
+
+      .theme-dark #chat { background: #000; }
+      .theme-dark .name-bar {
+        background: #1c1c1e;
+        border-bottom-color: rgba(255,255,255,0.08);
+      }
+      .theme-dark .name-bar label { color: #b0b0b0; }
+      .theme-dark .name-bar input { background: #2c2c2e; color: #fff; }
+
+      .theme-dark .roster-bar {
+        background: #000;
+        border-bottom-color: rgba(255,255,255,0.06);
+      }
+      .theme-dark .roster-chip { background: #2c2c2e; color: #e5e5ea; }
+
+      .theme-dark #messages { background: #000; }
+      .theme-dark #messages .system { color: #8e8e93; background: rgba(142,142,147,0.15); }
+
+      .theme-dark .reply-bar {
+        background: #111;
+        border-top-color: rgba(255,255,255,0.08);
+        color: #b0b0b0;
+      }
+      .theme-dark form {
+        background: #1c1c1e;
+        border-top-color: rgba(255,255,255,0.08);
+      }
+      .theme-dark #input { background: #2c2c2e; color: #fff; }
+      .theme-dark #input::placeholder { color: #8e8e93; }
+
+      /* 暗黑模式滚动条 */
+      .theme-dark #messages::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); }
+
     </style>
   </head>
   <body>
@@ -719,6 +788,7 @@
         </div>
         <div class="right-section">
           <button id="dissolveBtn" class="dissolve-btn" style="display:none;">解散房间</button>
+          <button id="themeToggle" class="theme-toggle" aria-label="切换暗黑模式" title="暗黑模式">🌙</button>
           <div class="status-indicator" id="status" style="display:none;">已连接</div>
         </div>
       </header>
@@ -849,6 +919,43 @@
       const statusEl = document.getElementById('status');
       const userCountEl = document.getElementById('userCount');
       const sendBtn = document.getElementById('sendBtn');
+
+      // ===== 主题切换（明/暗） =====
+      const themeToggleBtn = document.getElementById('themeToggle');
+      const metaTheme = document.querySelector('meta[name="theme-color"]');
+
+      function applyTheme(theme) {
+        const root = document.documentElement;
+        if (theme === 'dark') {
+          root.classList.add('theme-dark');
+          if (themeToggleBtn) themeToggleBtn.textContent = '☀️';
+          if (metaTheme) metaTheme.setAttribute('content', '#000000');
+          try { store.setItem('theme', 'dark'); } catch (_) {}
+        } else {
+          root.classList.remove('theme-dark');
+          if (themeToggleBtn) themeToggleBtn.textContent = '🌙';
+          if (metaTheme) metaTheme.setAttribute('content', '#f2f2f7');
+          try { store.setItem('theme', 'light'); } catch (_) {}
+        }
+      }
+
+      // 初始主题：优先本地存储，其次系统偏好
+      let preferredTheme = 'light';
+      try {
+        preferredTheme = store.getItem('theme') || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      } catch (_) {
+        preferredTheme = 'light';
+      }
+      applyTheme(preferredTheme);
+
+      // 切换按钮事件
+      if (themeToggleBtn) {
+        themeToggleBtn.addEventListener('click', () => {
+          const next = document.documentElement.classList.contains('theme-dark') ? 'light' : 'dark';
+          applyTheme(next);
+        });
+      }
+
 
       // 避免点击“发送”按钮时让输入框失焦，同时在触摸设备直接发送
       if (sendBtn) {
