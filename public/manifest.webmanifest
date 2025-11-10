@@ -1,6 +1,6 @@
 {
-  "name": "悄悄话",
-  "short_name": "悄悄话",
+  "name": "Whisp",
+  "short_name": "Whisp",
   "id": "/",
   "scope": "/",
   "start_url": "/?source=pwa",
@@ -23,4 +23,3 @@
     }
   ]
 }
-

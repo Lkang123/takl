@@ -7,9 +7,9 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="悄悄话" />
+    <meta name="apple-mobile-web-app-title" content="Whisp" />
 
-    <title>悄悄话</title>
+    <title>Whisp</title>
     <style>
       * {
         box-sizing: border-box;
@@ -519,14 +519,14 @@
 
       /* 消息气泡 */
       #messages .msg .bubble {
-        max-width: 72%;
-        min-width: 44px;
-        padding: 8px 12px;
-        border-radius: 16px;
+        max-width: 70%;
+        min-width: 42px;
+        padding: 6px 10px;
+        border-radius: 14px;
         word-wrap: break-word;
         word-break: break-word;
-        line-height: 1.38;
-        font-size: 15px;
+        line-height: 1.32;
+        font-size: 12px;
         position: relative;
       }
       /* 避免长按选择影响长按手势 */
@@ -704,7 +704,7 @@
         header .subtitle { font-size: 11px; }
         .name-bar { padding: 8px 12px; }
         #messages { padding: 12px; gap: 8px; }
-        #messages .msg .bubble { max-width: 80%; font-size: 14px; padding: 8px 10px; border-radius: 14px; }
+        #messages .msg .bubble { max-width: 78%; font-size: 12px; padding: 6px 9px; border-radius: 12px; }
         form { padding: 8px 12px; padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
       }
     </style>
@@ -714,7 +714,7 @@
       <!-- 顶部导航栏 -->
       <header>
         <div class="title">
-          <h1>悄悄话 <span class="user-count" id="userCount"></span></h1>
+          <h1>Whisp <span class="user-count" id="userCount"></span></h1>
           <div class="subtitle">🔒 端到端加密请放心说</div>
         </div>
         <div class="right-section">
@@ -742,7 +742,7 @@
         <div class="content-wrapper">
           <div class="lock-icon">🔐</div>
           <div class="row">
-            <div class="title">欢迎来到悄悄话</div>
+            <div class="title">欢迎来到 Whisp</div>
             <div class="description">创建新房间或加入已有房间开始聊天</div>
 
             <button id="createRoomBtn">创建新房间</button>
