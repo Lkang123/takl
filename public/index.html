@@ -916,6 +916,17 @@
           clear() { clear ? run(clear) : run(set, 0); }
         };
       })();
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext || null;
+      const SOUND_PREF_KEY = 'soundPref';
+      let soundEnabled = store.getItem(SOUND_PREF_KEY);
+      if (soundEnabled === null) {
+        soundEnabled = '1';
+        store.setItem(SOUND_PREF_KEY, soundEnabled);
+      }
+      soundEnabled = soundEnabled !== '0';
+      let audioCtx = null;
+      let lastSoundAt = 0;
+      const SOUND_COOLDOWN_MS = 800;
       const form = document.getElementById('form');
       const input = document.getElementById('input');
       const nameEl = document.getElementById('name');
@@ -1020,6 +1031,7 @@
           if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
             try { navigator.vibrate(20); } catch (_) {}
           }
+          playMessageSound();
         }
       }
 
@@ -1073,6 +1085,58 @@
             setTimeout(scrollToBottom, 100);
           }
         });
+      }
+
+      function ensureAudioContext() {
+        if (!soundEnabled) return null;
+        if (!AudioContextClass) return null;
+        if (!audioCtx) {
+          try {
+            audioCtx = new AudioContextClass();
+          } catch (err) {
+            return null;
+          }
+        }
+        if (audioCtx.state === 'suspended' && typeof audioCtx.resume === 'function') {
+          audioCtx.resume().catch(() => {});
+        }
+        return audioCtx;
+      }
+
+      function scheduleAudioUnlock() {
+        if (!AudioContextClass) return;
+        const handler = () => {
+          ensureAudioContext();
+          if (audioCtx && audioCtx.state === 'running') {
+            window.removeEventListener('pointerdown', handler, true);
+            window.removeEventListener('keydown', handler, true);
+          }
+        };
+        window.addEventListener('pointerdown', handler, true);
+        window.addEventListener('keydown', handler, true);
+      }
+      scheduleAudioUnlock();
+
+      function playMessageSound() {
+        if (!soundEnabled) return;
+        const ctx = ensureAudioContext();
+        if (!ctx || ctx.state !== 'running') return;
+        const now = Date.now();
+        if (now - lastSoundAt < SOUND_COOLDOWN_MS) return;
+        lastSoundAt = now;
+        try {
+          const t = ctx.currentTime;
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(920, t);
+          gain.gain.setValueAtTime(0.0001, t);
+          gain.gain.linearRampToValueAtTime(0.16, t + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+          osc.connect(gain).connect(ctx.destination);
+          osc.start(t);
+          osc.stop(t + 0.4);
+        } catch (_) {}
       }
 
       // 系统消息去重：记录最近的系统消息和时间戳
