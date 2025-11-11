@@ -531,6 +531,9 @@
         line-height: 1.32;
         font-size: 12px;
         position: relative;
+        display: inline-flex;
+        flex-direction: column;
+        gap: 4px;
       }
       /* 避免长按选择影响长按手势 */
       #messages .msg { -webkit-user-select: none; user-select: none; }
@@ -547,6 +550,16 @@
         background: #4da3ff;
         color: #fff;
         border-bottom-right-radius: 4px;
+      }
+
+      #messages .msg .bubble .meta {
+        font-size: 10px;
+        text-align: right;
+        opacity: 0.75;
+      }
+      #messages .msg.left .bubble .meta,
+      #messages .msg.right .bubble .meta {
+        color: rgba(255, 255, 255, 0.8);
       }
 
       /* 底部输入栏 */
@@ -643,14 +656,14 @@
 
       #input {
         flex: 1 1 auto;
-        min-height: 36px;
-        max-height: 100px;
-        padding: 8px 14px;
+        min-height: 30px;
+        max-height: 90px;
+        padding: 6px 12px;
         border: none;
-        border-radius: 18px;
+        border-radius: 14px;
         background: #fff;
-        font-size: 16px;
-        line-height: 1.4;
+        font-size: 14px;
+        line-height: 1.3;
         outline: none;
         resize: none;
         font-family: inherit;
@@ -663,17 +676,17 @@
 
       form button {
         flex: 0 0 auto;
-        padding: 8px 18px;
+        padding: 6px 14px;
         border: none;
-        border-radius: 18px;
+        border-radius: 14px;
         background: #007aff;
         color: #fff;
-        font-size: 16px;
+        font-size: 14px;
         font-weight: 600;
         cursor: pointer;
         transition: opacity 0.2s, transform 0.1s;
         white-space: nowrap;
-        min-height: 36px;
+        min-height: 30px;
       }
 
       form button:hover {
@@ -709,6 +722,7 @@
         #messages { padding: 12px; gap: 8px; }
         #messages .msg .bubble { max-width: 78%; font-size: 12px; padding: 6px 9px; border-radius: 12px; }
         form { padding: 8px 12px; padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
+        form button { padding: 6px 12px; font-size: 13px; min-height: 28px; border-radius: 12px; }
       }
 
       /* 主题切换按钮 */
@@ -1005,6 +1019,13 @@
         return dist <= threshold;
       }
 
+      function formatTime(ts) {
+        const d = new Date(typeof ts === 'number' ? ts : Date.now());
+        const h = String(d.getHours()).padStart(2, '0');
+        const m = String(d.getMinutes()).padStart(2, '0');
+        return `${h}:${m}`;
+      }
+
       function syncAppBadge() {
         if (!badgeApi) return;
         if (unreadCount > 0) {
@@ -1180,7 +1201,7 @@
           e.preventDefault();
           const now = Date.now();
           if (now < nameNextAt) {
-            addLine(`【系统】今日已修改过昵称，剩余 ${msToHHMM(nameNextAt - now)} 后可再修改`, 'system');
+            addLine(`【系统】今日已修改过昵称，剩余 ${msToHHMM(nameNextAt - now)} 后可再修改`, 'system', now);
             return;
           }
           sendNameUpdateNow();
@@ -1274,7 +1295,7 @@
           }
         }
         if (remain.length) sendQueue = remain.concat(sendQueue);
-        if (sent > 0) addLine(`已发送排队的${sent}条消息`, 'system');
+        if (sent > 0) addLine(`已发送排队的${sent}条消息`, 'system', Date.now());
       }
 
       // 生成随机房间密码
@@ -1552,12 +1573,12 @@
               return;
             }
             if (m.type === 'nameError') {
-              addLine(`【系统】${m.text || '昵称修改受限'}`, 'system');
+              addLine(`【系统】${m.text || '昵称修改受限'}`, 'system', m.at);
               return;
             }
             if (m.type === 'nameOk') {
               if (m.nextAt) { nameNextAt = m.nextAt; store.setItem('nameNextAt', String(m.nextAt)); }
-              addLine('【系统】昵称已更新', 'system');
+              addLine('【系统】昵称已更新', 'system', m.at);
               return;
             }
             if (m.type === 'userCount') {
@@ -1578,7 +1599,9 @@
               }
               // 加载历史消息
               if (m.messages && m.messages.length > 0) {
-                addLine('--- 历史消息 ---', 'system');
+                const firstTs = m.messages[0] && m.messages[0].at ? m.messages[0].at : Date.now();
+                const lastTs = m.messages[m.messages.length - 1] && m.messages[m.messages.length - 1].at ? m.messages[m.messages.length - 1].at : firstTs;
+                addLine('--- 历史消息 ---', 'system', firstTs);
                 isLoadingHistory = true;
                 try {
                   for (const msg of m.messages) {
@@ -1587,7 +1610,7 @@
                 } finally {
                   isLoadingHistory = false;
                 }
-                addLine('--- 以上是历史消息 ---', 'system');
+                addLine('--- 以上是历史消息 ---', 'system', lastTs);
                 resetUnreadCounters(true);
               }
               return;
@@ -1601,15 +1624,15 @@
                   dissolveBtn.style.display = 'block';
                 }
               }
-              return addLine(`【系统】${m.text}`, 'system');
+              return addLine(`【系统】${m.text}`, 'system', m.at);
             }
             if (m.type === 'messageError') {
-              return addLine(`【系统】${m.text}`, 'system');
+              return addLine(`【系统】${m.text}`, 'system', m.at);
             }
             if (m.type === 'roomDissolved') {
               // 房间被解散 - 立即清除本地存储和 URL 参数
               store.removeItem('currentRoom');
-              addLine(`【系统】${m.text}`, 'system');
+              addLine(`【系统】${m.text}`, 'system', m.at);
               setTimeout(() => {
                 // 清除 URL 参数后重新加载
                 window.history.replaceState({}, '', window.location.pathname);
@@ -1626,8 +1649,9 @@
         };
       }
 
-      function addLine(text, cls) {
+      function addLine(text, cls, at) {
         const stick = isNearBottom();
+        const ts = typeof at === 'number' ? at : Date.now();
         // 系统消息去重逻辑
         if (cls === 'system') {
           const now = Date.now();
@@ -1651,7 +1675,7 @@
 
         const div = document.createElement('div');
         if (cls) div.className = cls;
-        div.textContent = text;
+        div.textContent = (cls === 'system') ? `[${formatTime(ts)}] ${text}` : text;
         messages.appendChild(div);
         if (stick) {
           // 等待布局刷新后再贴底，避免被输入区遮挡
@@ -1740,6 +1764,8 @@
       }
 
       function addMessage(who, text, isMe, color, messageId, opts) {
+        const options = opts || {};
+        const timestamp = typeof options.timestamp === 'number' ? options.timestamp : Date.now();
         // 🔧 消息去重：如果提供了消息ID且已显示过，则跳过
         if (messageId) {
           if (displayedMessageIds.has(messageId)) {
@@ -1797,14 +1823,18 @@
 
         msgDiv.appendChild(bubble);
         // 引用放在气泡下方，独立一行
-        if (opts && opts.replyTo) {
+        if (options && options.replyTo) {
           const quote = document.createElement('div');
           quote.className = 'quote';
-          const qw = messageAuthorById.get(opts.replyTo) || ('#' + opts.replyTo);
-          const qt = messageTextById.get(opts.replyTo) || '';
+          const qw = messageAuthorById.get(options.replyTo) || ('#' + options.replyTo);
+          const qt = messageTextById.get(options.replyTo) || '';
           quote.textContent = `${qw}: ${qt ? qt.slice(0, 60) : ''}`;
           msgDiv.appendChild(quote);
         }
+        const meta = document.createElement('div');
+        meta.className = 'meta';
+        meta.textContent = formatTime(timestamp);
+        bubble.appendChild(meta);
         messages.appendChild(msgDiv);
         scrollToBottom();
 
@@ -1869,7 +1899,7 @@
       async function handleIncomingMessage(m) {
         // 版本提示
         if ((m.proto && m.proto !== PROTO_VERSION) || (m.kdf && (m.kdf.iter !== KDF_ITER || m.kdf.saltVer !== KDF_SALT_VER))) {
-          addLine('【系统】检测到不同版本/参数的消息，若无法正常解密，请刷新页面或使用同版本链接', 'system');
+          addLine('【系统】检测到不同版本/参数的消息，若无法正常解密，请刷新页面或使用同版本链接', 'system', m.at);
         }
         const who = m.name ? m.name : `#${m.from}`;
         const isMe = m.from === clientId;
@@ -1893,7 +1923,7 @@
           }
           if (obj.kind === 'reply' && obj.replyTo && typeof obj.text === 'string') {
             // 正常渲染消息，带引用 UI
-            addMessage(who, obj.text, isMe, m.color, m.id, { replyTo: obj.replyTo });
+            addMessage(who, obj.text, isMe, m.color, m.id, { replyTo: obj.replyTo, timestamp: m.at });
             // 存索引用于后续引用
             if (m.id) {
               messageTextById.set(m.id, obj.text);
@@ -1905,7 +1935,7 @@
           // 未识别结构化内容，降级为普通文本
         }
         // 普通文本
-        addMessage(who, plaintext, isMe, m.color, m.id);
+        addMessage(who, plaintext, isMe, m.color, m.id, { timestamp: m.at });
         if (m.id) {
           messageTextById.set(m.id, plaintext);
           messageAuthorById.set(m.id, who);
@@ -2000,7 +2030,7 @@
           const ciphertext = await encryptMessage(plain);
           const payload = { type: 'text', text: ciphertext, name: nameEl.value.trim() || undefined, proto: PROTO_VERSION, kdf: { saltVer: KDF_SALT_VER, iter: KDF_ITER } };
           sendQueue.push({ roomId: currentRoomId, payload });
-          addLine(`离线，已加入待发送队列（${sendQueue.length}）`, 'system');
+          addLine(`离线，已加入待发送队列（${sendQueue.length}）`, 'system', Date.now());
           input.value = '';
           if (document.activeElement !== input) {
             input.focus({ preventScroll: true });
