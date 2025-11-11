@@ -552,10 +552,18 @@
         border-bottom-right-radius: 4px;
       }
 
+      #messages .msg .bubble .bubble-line {
+        display: inline-flex;
+        align-items: flex-end;
+        gap: 6px;
+      }
+      #messages .msg .bubble .text {
+        white-space: pre-wrap;
+      }
       #messages .msg .bubble .meta {
         font-size: 10px;
-        text-align: right;
-        opacity: 0.75;
+        opacity: 0.7;
+        white-space: nowrap;
       }
       #messages .msg.left .bubble .meta,
       #messages .msg.right .bubble .meta {
@@ -1817,9 +1825,17 @@
         // - 他人：CSS 已设浅灰底黑字
         // - 自己：CSS 已设蓝底白字
 
-        const textSpan = document.createElement('div');
+        const line = document.createElement('div');
+        line.className = 'bubble-line';
+        const textSpan = document.createElement('span');
+        textSpan.className = 'text';
         textSpan.textContent = text;
-        bubble.appendChild(textSpan);
+        line.appendChild(textSpan);
+        const meta = document.createElement('span');
+        meta.className = 'meta';
+        meta.textContent = formatTime(timestamp);
+        line.appendChild(meta);
+        bubble.appendChild(line);
 
         msgDiv.appendChild(bubble);
         // 引用放在气泡下方，独立一行
@@ -1831,10 +1847,6 @@
           quote.textContent = `${qw}: ${qt ? qt.slice(0, 60) : ''}`;
           msgDiv.appendChild(quote);
         }
-        const meta = document.createElement('div');
-        meta.className = 'meta';
-        meta.textContent = formatTime(timestamp);
-        bubble.appendChild(meta);
         messages.appendChild(msgDiv);
         scrollToBottom();
 
