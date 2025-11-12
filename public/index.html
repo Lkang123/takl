@@ -599,29 +599,32 @@
       .reply-bar .preview { color: #8e8e93; }
       .reply-bar .close { border: none; background: transparent; color: #007aff; font-weight: 600; cursor: pointer; }
 
-      /* 引用块 */
+      /* 引用块（更小更紧凑） */
       .quote {
-        /* 独立于气泡的回复条：单独一行，不嵌入气泡（基础浅灰，左右侧再覆盖） */
-        font-size: 12px;
+        /* 独立于气泡的回复条：单独一行，不嵌入气泡；左侧竖条增强区分 */
+        font-size: 11px;
+        line-height: 1.25;
         color: #3c3c43;
-        padding: 6px 10px;
-        margin-top: 6px;
+        padding: 4px 8px;
+        margin-top: 4px;
         margin-bottom: 0;
         background: #e5e5ea;
-        border-radius: 10px;
+        border-left: 2px solid rgba(60,60,67,0.3);
+        border-radius: 8px;
         max-width: 75%;
       }
-      /* 左侧（他人）引用条：深灰底 + 浅灰字，更贴近截图 */
+      /* 左侧（他人）引用条 */
       #messages .msg.left .quote {
-        /* 浅灰气泡下的引用：再浅一点的灰底 + 深灰字 */
         background: #f2f2f7;
         color: #3c3c43;
+        border-left-color: rgba(60,60,67,0.3);
       }
-      /* 右侧（自己）引用条：浅蓝底 + 品牌蓝文字，确保在白色背景也可见 */
+      /* 右侧（自己）引用条：很浅蓝底 + 品牌蓝文字，与自家蓝气泡区分 */
       #messages .msg.right .quote {
-        background: #63b0ff; /* 更贴近自家蓝，提升对比 */
-        color: #fff; /* 白字 */
-        font-weight: 500;
+        background: #eaf3ff;
+        color: #0a84ff;
+        border-left-color: #0a84ff;
+        font-weight: 600;
       }
 
       /* 反应条 */
@@ -784,6 +787,23 @@
       .theme-dark .roster-chip { background: #2c2c2e; color: #e5e5ea; }
 
       .theme-dark #messages { background: #000; }
+      /* 暗黑主题下的引用块：提升我方气泡的区分度 */
+      .theme-dark .quote {
+        background: rgba(255,255,255,0.06);
+        color: #d0d0d0;
+        border-left: 2px solid rgba(255,255,255,0.25);
+      }
+      .theme-dark #messages .msg.left .quote {
+        background: rgba(255,255,255,0.06);
+        color: #e5e5ea;
+        border-left-color: rgba(255,255,255,0.25);
+      }
+      .theme-dark #messages .msg.right .quote {
+        background: rgba(10,132,255,0.20); /* 品牌蓝的半透明，弱化与自家蓝气泡的相近 */
+        color: #cfe6ff;
+        border-left-color: #0a84ff;
+      }
+
       .theme-dark #messages .system { color: #8e8e93; background: rgba(142,142,147,0.15); }
 
       .theme-dark .reply-bar {
