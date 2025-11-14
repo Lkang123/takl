@@ -1109,29 +1109,44 @@
         if (input) input.addEventListener('paste', handlePaste);
       })();
 
-      // 图片 UI 打磨：点击图片放大；移除“🖼 文件名”占位行
+      // 图片 UI 打磨：点击图片放大（支持鼠标滚轮缩放）；移除“🖼 文件名”占位行
       (function setupImageUiPolish(){
         const messagesEl = document.getElementById('messages');
         if (!messagesEl) return;
 
         // 轻量查看器
-        let viewerEl = null, viewerImg = null;
+        let viewerEl = null, viewerImg = null, viewerScale = 1;
         function ensureViewer() {
           if (viewerEl) return viewerEl;
           const overlay = document.createElement('div');
-          overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.9);display:none;align-items:center;justify-content:center;z-index:10000;padding:20px;';
+          overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.9);display:none;align-items:center;justify-content:center;z-index:10000;padding:20px;overflow:hidden;';
           const img = document.createElement('img');
-          img.style.cssText = 'max-width:100%;max-height:100%;border-radius:8px;';
+          img.style.cssText = 'max-width:100%;max-height:100%;border-radius:8px;transform-origin:center center;';
           overlay.appendChild(img);
           overlay.addEventListener('click', () => { overlay.style.display = 'none'; });
           document.addEventListener('keydown', (e) => { if (overlay.style.display !== 'none' && e.key === 'Escape') overlay.style.display = 'none'; });
+          // 鼠标滚轮缩放
+          overlay.addEventListener('wheel', (e) => {
+            if (!viewerImg) return;
+            e.preventDefault();
+            const delta = e.deltaY;
+            const factor = delta < 0 ? 1.1 : 1/1.1;
+            viewerScale = Math.max(1, Math.min(8, viewerScale * factor));
+            viewerImg.style.transform = 'scale(' + viewerScale + ')';
+          }, { passive: false });
+          // 双击重置
+          overlay.addEventListener('dblclick', (e) => {
+            if (!viewerImg) return;
+            viewerScale = 1;
+            viewerImg.style.transform = 'scale(1)';
+          });
           document.body.appendChild(overlay);
           viewerEl = overlay; viewerImg = img;
           return viewerEl;
         }
         function openViewer(url, alt) {
           const ov = ensureViewer();
-          if (viewerImg) { viewerImg.src = url; viewerImg.alt = alt || ''; }
+          if (viewerImg) { viewerImg.src = url; viewerImg.alt = alt || ''; viewerScale = 1; viewerImg.style.transform = 'scale(1)'; }
           ov.style.display = 'flex';
         }
 
@@ -1274,7 +1289,7 @@
                 img.loading = 'lazy';
                 img.addEventListener('click', () => openImageViewer(imgUrl, img.alt));
                 ph.replaceWith(img);
-                img.addEventListener('load', () => { if (isNearBottom(200)) scrollToBottom(); });
+                img.addEventListener('load', () => { if (isNearBottom(200)) scrollToBottom(); try { URL.revokeObjectURL(imgUrl); } catch (_) {} });
               } catch (_) {
                 const fail = document.createElement('div');
                 fail.textContent = '图片加载失败或已过期';
@@ -2290,67 +2305,88 @@
         handleMessageReminder(who, plaintext, isMe);
       }
 
-      // 扩展：图片消息（先拦截处理，再回退到原逻辑）
-      (function extendHandleIncomingForImages(){
+      // 将图片消息在主处理函数内直接渲染为图片气泡（不显示文件名文本）
+      (function patchHandleIncomingMessageForImages(){
         if (typeof handleIncomingMessage !== 'function') return;
-        const __origHandleIncomingMessage = handleIncomingMessage;
+        const __orig = handleIncomingMessage;
         handleIncomingMessage = async function(m) {
+          // 尝试优先处理图片类型
           try {
-            const who = m.name ? m.name : `#${m.from}`;
-            const isMe = m.from === clientId;
             const plaintext = await decryptMessage(m.text);
             const obj = tryParseJson(plaintext);
             if (obj && obj.kind === 'image' && obj.url) {
-              // 先渲染占位文本
-              addMessage(who, obj.name ? `🖼 ${obj.name}` : '🖼 图片', isMe, m.color, m.id, { timestamp: m.at });
-              // 异步加载与解密图片
-              (async () => {
-                try {
-                  const msgDiv = messages.querySelector(`.msg[data-mid="${m.id}"]`);
-                  const bubble = msgDiv && msgDiv.querySelector('.bubble');
-                  if (!bubble) return;
-                  const ph = document.createElement('div');
-                  ph.textContent = '图片加载中…';
-                  ph.style.fontSize = '12px';
-                  ph.style.opacity = '0.7';
-                  ph.style.marginTop = '6px';
-                  bubble.appendChild(ph);
-                  const res = await fetch(obj.url, { cache: 'force-cache' });
-                  if (!res.ok) throw new Error('fetch_failed');
-                  const encBuf = new Uint8Array(await res.arrayBuffer());
-                  const dec = await decryptBytes(encBuf);
-                  const blob = new Blob([dec], { type: obj.mime || 'application/octet-stream' });
-                  const imgUrl = URL.createObjectURL(blob);
-                  const img = document.createElement('img');
-                  img.src = imgUrl;
-                  img.alt = obj.name || 'image';
-                  img.style.maxWidth = '70%';
-                  img.style.borderRadius = '8px';
-                  img.style.display = 'block';
-                  img.style.marginTop = '6px';
-                  img.loading = 'lazy';
-                  ph.replaceWith(img);
-                  img.addEventListener('load', () => { if (isNearBottom(200)) scrollToBottom(); });
-                } catch (_) {
-                  const msgDiv = messages.querySelector(`.msg[data-mid="${m.id}"]`);
-                  const bubble = msgDiv && msgDiv.querySelector('.bubble');
-                  if (!bubble) return;
-                  const fail = document.createElement('div');
-                  fail.textContent = '图片加载失败或已过期';
-                  fail.style.fontSize = '12px';
-                  fail.style.opacity = '0.7';
-                  fail.style.marginTop = '6px';
-                  bubble.appendChild(fail);
-                }
-              })();
-              if (m.id) {
-                messageTextById.set(m.id, obj.name ? `🖼 ${obj.name}` : '🖼 图片');
-                messageAuthorById.set(m.id, who);
+              const who = m.name ? m.name : `#${m.from}`;
+              const isMe = m.from === clientId;
+              const mid = m.id;
+              // 容器与气泡
+              const msgDiv = document.createElement('div');
+              msgDiv.className = 'msg ' + (isMe ? 'right' : 'left');
+              if (mid) msgDiv.setAttribute('data-mid', mid);
+              if (!isMe) {
+                const nameSpan = document.createElement('div');
+                nameSpan.className = 'name';
+                nameSpan.textContent = who;
+                msgDiv.appendChild(nameSpan);
+              }
+              const bubble = document.createElement('div');
+              bubble.className = 'bubble';
+              // 手势与反应
+              msgDiv.addEventListener('dblclick', () => { if (mid) sendReaction(mid, '👍'); });
+              if (!isTouchDevice) {
+                msgDiv.addEventListener('contextmenu', (e) => {
+                  e.preventDefault();
+                  if (mid) showReactionPalette(mid, bubble);
+                });
+              }
+              if (mid) bindMobileDoubleTap(msgDiv, mid, () => sendReaction(mid, '👍'));
+              if (mid) bindLongPress(msgDiv, 500, () => showReactionPalette(mid, bubble));
+              // 加载占位
+              const ph = document.createElement('div');
+              ph.textContent = '图片加载中…';
+              ph.style.fontSize = '12px';
+              ph.style.opacity = '0.7';
+              ph.style.marginTop = '6px';
+              bubble.appendChild(ph);
+              msgDiv.appendChild(bubble);
+              messages.appendChild(msgDiv);
+              scrollToBottom();
+              // 拉取与解密
+              try {
+                const res = await fetch(obj.url, { cache: 'force-cache' });
+                if (!res.ok) throw new Error('fetch_failed');
+                const encBuf = new Uint8Array(await res.arrayBuffer());
+                const dec = await decryptBytes(encBuf);
+                const blob = new Blob([dec], { type: obj.mime || 'application/octet-stream' });
+                const imgUrl = URL.createObjectURL(blob);
+                const img = document.createElement('img');
+                img.src = imgUrl;
+                img.alt = obj.name || 'image';
+                img.style.maxWidth = '70%';
+                img.style.borderRadius = '8px';
+                img.style.display = 'block';
+                img.style.marginTop = '6px';
+                img.style.cursor = 'zoom-in';
+                img.loading = 'lazy';
+                ph.replaceWith(img);
+                img.addEventListener('load', () => { if (isNearBottom(200)) scrollToBottom(); try { URL.revokeObjectURL(imgUrl); } catch (_) {} });
+              } catch (_) {
+                const fail = document.createElement('div');
+                fail.textContent = '图片加载失败或已过期';
+                fail.style.fontSize = '12px';
+                fail.style.opacity = '0.7';
+                fail.style.marginTop = '6px';
+                ph.replaceWith(fail);
+              }
+              if (mid) {
+                messageTextById.set(mid, '🖼 图片');
+                messageAuthorById.set(mid, who);
+                renderReactionsFor(mid);
               }
               return;
             }
           } catch {}
-          return __origHandleIncomingMessage(m);
+          // 其他情况走原始逻辑
+          return __orig(m);
         };
       })();
 
