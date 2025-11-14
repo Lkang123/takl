@@ -1115,7 +1115,7 @@
         if (!messagesEl) return;
 
         // 轻量查看器
-        let viewerEl = null, viewerImg = null, viewerScale = 1;
+        let viewerEl = null, viewerImg = null, viewerScale = 1, viewerBlobUrl = null;
         function ensureViewer() {
           if (viewerEl) return viewerEl;
           const overlay = document.createElement('div');
@@ -1123,8 +1123,14 @@
           const img = document.createElement('img');
           img.style.cssText = 'max-width:100%;max-height:100%;border-radius:8px;transform-origin:center center;';
           overlay.appendChild(img);
-          overlay.addEventListener('click', () => { overlay.style.display = 'none'; });
-          document.addEventListener('keydown', (e) => { if (overlay.style.display !== 'none' && e.key === 'Escape') overlay.style.display = 'none'; });
+          function closeViewer() {
+            overlay.style.display = 'none';
+            viewerScale = 1;
+            if (viewerImg) viewerImg.style.transform = 'scale(1)';
+            if (viewerBlobUrl) { try { URL.revokeObjectURL(viewerBlobUrl); } catch (_) {} viewerBlobUrl = null; }
+          }
+          overlay.addEventListener('click', closeViewer);
+          document.addEventListener('keydown', (e) => { if (overlay.style.display !== 'none' && e.key === 'Escape') closeViewer(); });
           // 鼠标滚轮缩放
           overlay.addEventListener('wheel', (e) => {
             if (!viewerImg) return;
@@ -1144,10 +1150,39 @@
           viewerEl = overlay; viewerImg = img;
           return viewerEl;
         }
-        function openViewer(url, alt) {
+        async function openViewerFromImg(imgEl) {
           const ov = ensureViewer();
-          if (viewerImg) { viewerImg.src = url; viewerImg.alt = alt || ''; viewerScale = 1; viewerImg.style.transform = 'scale(1)'; }
-          ov.style.display = 'flex';
+          viewerScale = 1;
+          if (viewerImg) viewerImg.style.transform = 'scale(1)';
+          const cipherUrl = (imgEl && imgEl.dataset && imgEl.dataset.cipherUrl) || '';
+          const mime = (imgEl && imgEl.dataset && imgEl.dataset.mime) || '';
+          const alt = (imgEl && imgEl.alt) || '';
+          if (!cipherUrl) {
+            // 回退到当前 src（可能是有效的 blob 或远程图）
+            viewerImg.src = imgEl && imgEl.src ? imgEl.src : '';
+            viewerImg.alt = alt;
+            ov.style.display = 'flex';
+            return;
+          }
+          try {
+            const res = await fetch(cipherUrl, { cache: 'force-cache' });
+            if (!res.ok) throw new Error('fetch_failed');
+            const encBuf = new Uint8Array(await res.arrayBuffer());
+            const dec = await decryptBytes(encBuf);
+            const blob = new Blob([dec], { type: mime || 'application/octet-stream' });
+            const url = URL.createObjectURL(blob);
+            // 记录以便关闭时释放
+            if (viewerBlobUrl) { try { URL.revokeObjectURL(viewerBlobUrl); } catch (_) {} }
+            viewerBlobUrl = url;
+            viewerImg.src = url;
+            viewerImg.alt = alt;
+            ov.style.display = 'flex';
+          } catch (_) {
+            // 回退
+            viewerImg.src = imgEl && imgEl.src ? imgEl.src : '';
+            viewerImg.alt = alt;
+            ov.style.display = 'flex';
+          }
         }
 
         // 事件代理：点击图片放大
@@ -1156,10 +1191,7 @@
           if (!img) return;
           // 仅限气泡内图片
           if (!img.closest || !img.closest('.bubble')) return;
-          // 使用现有 URL（已是 Blob URL）
-          try {
-            openViewer(img.src, img.alt || '');
-          } catch (_) {}
+          openViewerFromImg(img);
         });
 
         // 观察新增消息：若图片气泡前有“🖼 文件名”占位行，移除它
@@ -1281,13 +1313,13 @@
                 const img = document.createElement('img');
                 img.src = imgUrl;
                 img.alt = obj.name || 'image';
+                try { img.dataset.cipherUrl = obj.url || ''; img.dataset.mime = obj.mime || 'application/octet-stream'; } catch (_) {}
                 img.style.maxWidth = '70%';
                 img.style.borderRadius = '8px';
                 img.style.display = 'block';
                 img.style.marginTop = '6px';
                 img.style.cursor = 'zoom-in';
                 img.loading = 'lazy';
-                img.addEventListener('click', () => openImageViewer(imgUrl, img.alt));
                 ph.replaceWith(img);
                 img.addEventListener('load', () => { if (isNearBottom(200)) scrollToBottom(); try { URL.revokeObjectURL(imgUrl); } catch (_) {} });
               } catch (_) {
@@ -2361,6 +2393,7 @@
                 const img = document.createElement('img');
                 img.src = imgUrl;
                 img.alt = obj.name || 'image';
+                try { img.dataset.cipherUrl = obj.url || ''; img.dataset.mime = obj.mime || 'application/octet-stream'; } catch (_) {}
                 img.style.maxWidth = '70%';
                 img.style.borderRadius = '8px';
                 img.style.display = 'block';
