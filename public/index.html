@@ -829,11 +829,11 @@
       <header>
         <div class="title">
           <h1>Whisp <span class="user-count" id="userCount"></span></h1>
-          <div class="subtitle">🔒 端到端加密请放心说</div>
+          <div class="subtitle">端到端加密，你可以放心说</div>
         </div>
         <div class="right-section">
           <button id="dissolveBtn" class="dissolve-btn" style="display:none;">解散房间</button>
-          <button id="themeToggle" class="theme-toggle" aria-label="切换暗黑模式" title="暗黑模式">🌙</button>
+          <button id="themeToggle" class="theme-toggle" aria-label="切换暗黑模式" title="暗黑模式">关灯</button>
           <div class="status-indicator" id="status" style="display:none;">已连接</div>
         </div>
       </header>
@@ -855,7 +855,6 @@
       <!-- 认证界面 -->
       <div id="auth">
         <div class="content-wrapper">
-          <div class="lock-icon">🔐</div>
           <div class="row">
             <div class="title">欢迎来到 Whisp</div>
             <div class="description">创建新房间或加入已有房间开始聊天</div>
@@ -984,12 +983,12 @@
         const root = document.documentElement;
         if (theme === 'dark') {
           root.classList.add('theme-dark');
-          if (themeToggleBtn) themeToggleBtn.textContent = '☀️';
+          if (themeToggleBtn) themeToggleBtn.textContent = '开灯';
           if (metaTheme) metaTheme.setAttribute('content', '#000000');
           try { store.setItem('theme', 'dark'); } catch (_) {}
         } else {
           root.classList.remove('theme-dark');
-          if (themeToggleBtn) themeToggleBtn.textContent = '🌙';
+          if (themeToggleBtn) themeToggleBtn.textContent = '关灯';
           if (metaTheme) metaTheme.setAttribute('content', '#f2f2f7');
           try { store.setItem('theme', 'light'); } catch (_) {}
         }
@@ -2146,5 +2145,6 @@
         }
       });
     </script>
+    <script src="/emoji-setup.js"></script>
   </body>
 </html>
