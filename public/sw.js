@@ -46,8 +46,12 @@ self.addEventListener('fetch', (event) => {
 async function networkFirst(req) {
   try {
     const fresh = await fetch(req);
-    const cache = await caches.open(CACHE_NAME);
-    cache.put(req, fresh.clone());
+    try {
+      if (fresh && fresh.ok && (fresh.type === 'basic' || fresh.type === 'cors')) {
+        const cache = await caches.open(CACHE_NAME);
+        await cache.put(req, fresh.clone());
+      }
+    } catch (_) {}
     return fresh;
   } catch (err) {
     const cached = await caches.match('/index.html');
@@ -59,7 +63,11 @@ async function staleWhileRevalidate(req) {
   const cache = await caches.open(CACHE_NAME);
   const cached = await cache.match(req);
   const network = fetch(req).then((res) => {
-    cache.put(req, res.clone());
+    try {
+      if (res && res.ok && (res.type === 'basic' || res.type === 'cors')) {
+        cache.put(req, res.clone());
+      }
+    } catch (_) {}
     return res;
   }).catch(() => null);
   return cached || network || new Response('', { status: 204 });

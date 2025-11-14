@@ -35,7 +35,8 @@
     return new Promise(function (resolve, reject) {
       if (window.EmojiButton) return resolve(window.EmojiButton);
       var s = document.createElement('script');
-      s.src = 'https://cdn.jsdelivr.net/npm/@joeattardi/emoji-button@4/dist/index.min.js';
+      // Use UMD build to avoid "Unexpected token export" in non-module script context
+      s.src = 'https://cdn.jsdelivr.net/npm/@joeattardi/emoji-button@4/dist/index.umd.min.js';
       s.async = true;
       s.crossOrigin = 'anonymous';
       s.onload = function () { resolve(window.EmojiButton); };
@@ -93,4 +94,3 @@
     // Ignore load failure: chat still works without the picker.
   });
 })();
-
