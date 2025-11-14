@@ -4,7 +4,9 @@ const CACHE_NAME = `whisper-${CACHE_VERSION}`;
 const STATIC_ASSETS = [
   '/',
   '/index.html',
-  '/manifest.webmanifest'
+  '/manifest.webmanifest',
+  '/emoji-setup.js',
+  '/vendor/emoji-button/index.js'
 ];
 
 self.addEventListener('install', (event) => {

@@ -34,14 +34,26 @@
   function loadEmojiLib() {
     return new Promise(function (resolve, reject) {
       if (window.EmojiButton) return resolve(window.EmojiButton);
-      var s = document.createElement('script');
-      // Use UMD build to avoid "Unexpected token export" in non-module script context
-      s.src = 'https://cdn.jsdelivr.net/npm/@joeattardi/emoji-button@4/dist/index.umd.min.js';
-      s.async = true;
-      s.crossOrigin = 'anonymous';
-      s.onload = function () { resolve(window.EmojiButton); };
-      s.onerror = function () { reject(new Error('failed to load emoji-button')); };
-      document.head.appendChild(s);
+      // Preferred: local ESM build wrapped into window.EmojiButton via a tiny module shim
+      var shim = document.createElement('script');
+      shim.type = 'module';
+      shim.textContent = "import EmojiButton from '/vendor/emoji-button/index.js'; window.EmojiButton = EmojiButton;";
+      shim.onload = function () {
+        if (window.EmojiButton) return resolve(window.EmojiButton);
+        fallbackCdn();
+      };
+      shim.onerror = function () { fallbackCdn(); };
+      document.head.appendChild(shim);
+
+      function fallbackCdn() {
+        // Fallback: load ESM from CDN via module shim
+        var mod = document.createElement('script');
+        mod.type = 'module';
+        mod.textContent = "import EmojiButton from 'https://cdn.jsdelivr.net/npm/@joeattardi/emoji-button@4/dist/index.js'; window.EmojiButton = EmojiButton;";
+        mod.onload = function () { if (window.EmojiButton) resolve(window.EmojiButton); else reject(new Error('emoji-button cdn module loaded but global not found')); };
+        mod.onerror = function () { reject(new Error('failed to load emoji-button from cdn')); };
+        document.head.appendChild(mod);
+      }
     });
   }
 
