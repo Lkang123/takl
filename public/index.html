@@ -1109,6 +1109,83 @@
         if (input) input.addEventListener('paste', handlePaste);
       })();
 
+      // 图片 UI 打磨：点击图片放大；移除“🖼 文件名”占位行
+      (function setupImageUiPolish(){
+        const messagesEl = document.getElementById('messages');
+        if (!messagesEl) return;
+
+        // 轻量查看器
+        let viewerEl = null, viewerImg = null;
+        function ensureViewer() {
+          if (viewerEl) return viewerEl;
+          const overlay = document.createElement('div');
+          overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.9);display:none;align-items:center;justify-content:center;z-index:10000;padding:20px;';
+          const img = document.createElement('img');
+          img.style.cssText = 'max-width:100%;max-height:100%;border-radius:8px;';
+          overlay.appendChild(img);
+          overlay.addEventListener('click', () => { overlay.style.display = 'none'; });
+          document.addEventListener('keydown', (e) => { if (overlay.style.display !== 'none' && e.key === 'Escape') overlay.style.display = 'none'; });
+          document.body.appendChild(overlay);
+          viewerEl = overlay; viewerImg = img;
+          return viewerEl;
+        }
+        function openViewer(url, alt) {
+          const ov = ensureViewer();
+          if (viewerImg) { viewerImg.src = url; viewerImg.alt = alt || ''; }
+          ov.style.display = 'flex';
+        }
+
+        // 事件代理：点击图片放大
+        messagesEl.addEventListener('click', (e) => {
+          const img = e.target && e.target.tagName === 'IMG' ? e.target : null;
+          if (!img) return;
+          // 仅限气泡内图片
+          if (!img.closest || !img.closest('.bubble')) return;
+          // 使用现有 URL（已是 Blob URL）
+          try {
+            openViewer(img.src, img.alt || '');
+          } catch (_) {}
+        });
+
+        // 观察新增消息：若图片气泡前有“🖼 文件名”占位行，移除它
+        const observer = new MutationObserver((list) => {
+          for (const m of list) {
+            for (const node of m.addedNodes || []) {
+              if (!(node instanceof HTMLElement)) continue;
+              // 找所有含图片的气泡
+              const bubbles = node.matches && node.matches('.msg') ? node.querySelectorAll('.bubble') : node.querySelectorAll ? node.querySelectorAll('.bubble') : [];
+              bubbles.forEach((bub) => {
+                if (!bub.querySelector('img')) return;
+                const firstLine = bub.querySelector('.bubble-line');
+                if (!firstLine) return;
+                const textEl = firstLine.querySelector('.text');
+                if (textEl && typeof textEl.textContent === 'string' && textEl.textContent.trim().startsWith('🖼')) {
+                  firstLine.remove();
+                }
+              });
+            }
+          }
+        });
+        try {
+          observer.observe(messagesEl, { childList: true, subtree: true });
+        } catch (_) {}
+        // 初始清理一遍（针对刷新前已加载的图片）
+        (function sweep(){
+          try {
+            const bubbles = messagesEl.querySelectorAll('.bubble');
+            bubbles.forEach((bub) => {
+              if (!bub.querySelector('img')) return;
+              const firstLine = bub.querySelector('.bubble-line');
+              if (!firstLine) return;
+              const textEl = firstLine.querySelector('.text');
+              if (textEl && typeof textEl.textContent === 'string' && textEl.textContent.trim().startsWith('🖼')) {
+                firstLine.remove();
+              }
+            });
+          } catch (_) {}
+        })();
+      })();
+
       // 再次覆盖：图片消息显示为纯图片气泡（不显示文件名文本），并支持点击放大查看
       (function enhanceImageRendering(){
         if (typeof handleIncomingMessage !== 'function') return;
