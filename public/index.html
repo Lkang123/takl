@@ -833,7 +833,7 @@
         </div>
         <div class="right-section">
           <button id="dissolveBtn" class="dissolve-btn" style="display:none;">解散房间</button>
-          <button id="themeToggle" class="theme-toggle" aria-label="切换暗黑模式" title="暗黑模式">关灯</button>
+          <button id="themeToggle" class="theme-toggle" aria-label="切换暗黑模式" title="暗黑模式">🌙</button>
           <div class="status-indicator" id="status" style="display:none;">已连接</div>
         </div>
       </header>
@@ -987,12 +987,12 @@
         const root = document.documentElement;
         if (theme === 'dark') {
           root.classList.add('theme-dark');
-          if (themeToggleBtn) themeToggleBtn.textContent = '开灯';
+          if (themeToggleBtn) themeToggleBtn.textContent = '☀️';
           if (metaTheme) metaTheme.setAttribute('content', '#000000');
           try { store.setItem('theme', 'dark'); } catch (_) {}
         } else {
           root.classList.remove('theme-dark');
-          if (themeToggleBtn) themeToggleBtn.textContent = '关灯';
+          if (themeToggleBtn) themeToggleBtn.textContent = '🌙';
           if (metaTheme) metaTheme.setAttribute('content', '#f2f2f7');
           try { store.setItem('theme', 'light'); } catch (_) {}
         }
@@ -1116,20 +1116,28 @@
 
         // 轻量查看器
         let viewerEl = null, viewerImg = null, viewerScale = 1, viewerBlobUrl = null;
+        let viewerOffsetX = 0, viewerOffsetY = 0;
+        let isPanning = false, panStartX = 0, panStartY = 0, panBaseX = 0, panBaseY = 0;
+        function applyViewerTransform() {
+          if (!viewerImg) return;
+          viewerImg.style.transform = 'translate(' + viewerOffsetX + 'px,' + viewerOffsetY + 'px) scale(' + viewerScale + ')';
+          viewerImg.style.cursor = viewerScale > 1 ? (isPanning ? 'grabbing' : 'grab') : 'auto';
+        }
         function ensureViewer() {
           if (viewerEl) return viewerEl;
           const overlay = document.createElement('div');
-          overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.9);display:none;align-items:center;justify-content:center;z-index:10000;padding:20px;overflow:hidden;';
+          overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.9);display:none;align-items:center;justify-content:center;z-index:10000;padding:20px;overflow:hidden;user-select:none;touch-action:none;';
           const img = document.createElement('img');
           img.style.cssText = 'max-width:100%;max-height:100%;border-radius:8px;transform-origin:center center;';
           overlay.appendChild(img);
           function closeViewer() {
             overlay.style.display = 'none';
             viewerScale = 1;
-            if (viewerImg) viewerImg.style.transform = 'scale(1)';
+            viewerOffsetX = 0; viewerOffsetY = 0;
+            applyViewerTransform();
             if (viewerBlobUrl) { try { URL.revokeObjectURL(viewerBlobUrl); } catch (_) {} viewerBlobUrl = null; }
           }
-          overlay.addEventListener('click', closeViewer);
+          overlay.addEventListener('click', (e) => { if (e.target === overlay) closeViewer(); });
           document.addEventListener('keydown', (e) => { if (overlay.style.display !== 'none' && e.key === 'Escape') closeViewer(); });
           // 鼠标滚轮缩放
           overlay.addEventListener('wheel', (e) => {
@@ -1138,14 +1146,42 @@
             const delta = e.deltaY;
             const factor = delta < 0 ? 1.1 : 1/1.1;
             viewerScale = Math.max(1, Math.min(8, viewerScale * factor));
-            viewerImg.style.transform = 'scale(' + viewerScale + ')';
+            applyViewerTransform();
           }, { passive: false });
           // 双击重置
           overlay.addEventListener('dblclick', (e) => {
             if (!viewerImg) return;
             viewerScale = 1;
-            viewerImg.style.transform = 'scale(1)';
+            viewerOffsetX = 0; viewerOffsetY = 0;
+            applyViewerTransform();
           });
+          // 拖拽平移（Pointer 事件）
+          img.addEventListener('pointerdown', (e) => {
+            if (!viewerImg) return;
+            if (viewerScale <= 1) return; // 仅放大后才允许平移
+            isPanning = true;
+            panStartX = e.clientX; panStartY = e.clientY;
+            panBaseX = viewerOffsetX; panBaseY = viewerOffsetY;
+            try { viewerImg.setPointerCapture(e.pointerId); } catch (_) {}
+            e.preventDefault();
+          });
+          img.addEventListener('pointermove', (e) => {
+            if (!isPanning) return;
+            const dx = e.clientX - panStartX;
+            const dy = e.clientY - panStartY;
+            viewerOffsetX = panBaseX + dx;
+            viewerOffsetY = panBaseY + dy;
+            applyViewerTransform();
+            e.preventDefault();
+          });
+          const panEnd = (e) => {
+            if (!isPanning) return;
+            isPanning = false;
+            try { viewerImg.releasePointerCapture && viewerImg.releasePointerCapture(e.pointerId); } catch (_) {}
+          };
+          img.addEventListener('pointerup', panEnd);
+          img.addEventListener('pointercancel', panEnd);
+          img.addEventListener('pointerleave', panEnd);
           document.body.appendChild(overlay);
           viewerEl = overlay; viewerImg = img;
           return viewerEl;
@@ -1153,13 +1189,14 @@
         async function openViewerFromImg(imgEl) {
           const ov = ensureViewer();
           viewerScale = 1;
-          if (viewerImg) viewerImg.style.transform = 'scale(1)';
+          viewerOffsetX = 0; viewerOffsetY = 0;
+          applyViewerTransform();
           const cipherUrl = (imgEl && imgEl.dataset && imgEl.dataset.cipherUrl) || '';
           const mime = (imgEl && imgEl.dataset && imgEl.dataset.mime) || '';
           const alt = (imgEl && imgEl.alt) || '';
           if (!cipherUrl) {
             // 回退到当前 src（可能是有效的 blob 或远程图）
-            viewerImg.src = imgEl && imgEl.src ? imgEl.src : '';
+            if (viewerImg) viewerImg.src = imgEl && imgEl.src ? imgEl.src : '';
             viewerImg.alt = alt;
             ov.style.display = 'flex';
             return;
@@ -1174,12 +1211,12 @@
             // 记录以便关闭时释放
             if (viewerBlobUrl) { try { URL.revokeObjectURL(viewerBlobUrl); } catch (_) {} }
             viewerBlobUrl = url;
-            viewerImg.src = url;
+            if (viewerImg) viewerImg.src = url;
             viewerImg.alt = alt;
             ov.style.display = 'flex';
           } catch (_) {
             // 回退
-            viewerImg.src = imgEl && imgEl.src ? imgEl.src : '';
+            if (viewerImg) viewerImg.src = imgEl && imgEl.src ? imgEl.src : '';
             viewerImg.alt = alt;
             ov.style.display = 'flex';
           }
@@ -1321,6 +1358,13 @@
                 img.style.cursor = 'zoom-in';
                 img.loading = 'lazy';
                 ph.replaceWith(img);
+                // 加上时间（图片气泡下方的小字时间）
+                try {
+                  const meta = document.createElement('div');
+                  meta.className = 'meta';
+                  meta.textContent = formatTime(m.at);
+                  bubble.appendChild(meta);
+                } catch (_) {}
                 img.addEventListener('load', () => { if (isNearBottom(200)) scrollToBottom(); try { URL.revokeObjectURL(imgUrl); } catch (_) {} });
               } catch (_) {
                 const fail = document.createElement('div');
