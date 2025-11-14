@@ -1,5 +1,5 @@
 /* Simple PWA service worker for Whisper Chat */
-const CACHE_VERSION = 'v2';
+const CACHE_VERSION = 'v3';
 const CACHE_NAME = `whisper-${CACHE_VERSION}`;
 const STATIC_ASSETS = [
   '/',
@@ -34,6 +34,11 @@ self.addEventListener('fetch', (event) => {
     if (!(url.protocol === 'http:' || url.protocol === 'https:')) return;
     const sameOrigin = url.origin === self.location.origin;
     if (!sameOrigin) return;
+    // Do NOT cache uploaded blobs: network-only for /u/*
+    if (url.pathname.startsWith('/u/')) {
+      event.respondWith(fetch(req));
+      return;
+    }
   } catch (_) { return; }
 
   const isHTML = req.destination === 'document' || (req.headers.get('accept') || '').includes('text/html');

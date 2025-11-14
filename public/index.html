@@ -893,8 +893,10 @@
           <button id="replyCancel" class="close">取消</button>
         </div>
         <form id="form">
+          <button type="button" id="imageBtn" title="发送图片">🖼️</button>
           <input id="input" type="text" placeholder="iMessage" autocomplete="off" enterkeyhint="send" autocapitalize="off" autocorrect="off" spellcheck="false" />
           <button type="button" id="sendBtn">发送</button>
+          <input id="imagePicker" type="file" accept="image/*" style="display:none" />
         </form>
       </div>
     </div>
@@ -970,6 +972,8 @@
       const SOUND_COOLDOWN_MS = 800;
       const form = document.getElementById('form');
       const input = document.getElementById('input');
+      const imageBtn = document.getElementById('imageBtn');
+      const imagePicker = document.getElementById('imagePicker');
       const nameEl = document.getElementById('name');
       const statusEl = document.getElementById('status');
       const userCountEl = document.getElementById('userCount');
@@ -1010,6 +1014,100 @@
           applyTheme(next);
         });
       }
+
+      // 发送图片：本地加密 -> 上传密文 -> 发送引用消息
+      (function setupImageSend(){
+        if (!imageBtn || !imagePicker) return;
+        // 样式轻量化：复用 emoji-setup 注入的 .icon-btn；没有也不影响功能
+        try { imageBtn.classList.add('icon-btn'); } catch (_) {}
+
+        imageBtn.addEventListener('mousedown', (e) => { e.preventDefault(); input && input.focus({ preventScroll: true }); }, { passive: false });
+        imageBtn.addEventListener('click', () => imagePicker.click());
+
+        const MAX_MB = 8;
+
+        async function sendImageFile(f, suggestedName) {
+          if (!f) return;
+          const size = f.size || (f.buffer ? f.buffer.byteLength : 0);
+          if (size > MAX_MB * 1024 * 1024) {
+            addLine(`【系统】图片过大，最大 ${MAX_MB}MB`, 'system', Date.now());
+            return;
+          }
+          if (!isWsOpen()) {
+            addLine('【系统】当前离线，图片暂不支持离线排队发送', 'system', Date.now());
+            return;
+          }
+          try {
+            const ab = f.arrayBuffer ? await f.arrayBuffer() : (f.buffer || null);
+            if (!ab) throw new Error('no_buffer');
+            const cipher = await encryptBytes(new Uint8Array(ab));
+            const resp = await fetch('/upload', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/octet-stream' },
+              body: cipher
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok || !data || !data.ok || !data.id) {
+              throw new Error('upload_failed');
+            }
+            const name = (f.name && typeof f.name === 'string' ? f.name : (suggestedName || 'image'));
+            const info = { kind: 'image', url: data.url || (`/u/${data.id}`), name, mime: f.type || 'application/octet-stream', size: size };
+            const ciphertext = await encryptMessage(JSON.stringify(info));
+            const out = { type: 'text', text: ciphertext, name: nameEl.value.trim() || undefined, proto: PROTO_VERSION, kdf: { saltVer: KDF_SALT_VER, iter: KDF_ITER } };
+            ws.send(JSON.stringify(out));
+          } catch (e) {
+            addLine('【系统】图片发送失败', 'system', Date.now());
+          } finally {
+            setTimeout(() => { try { input.focus({ preventScroll: true }); } catch (_) {} }, 0);
+          }
+        }
+
+        // 文件选择发送
+        imagePicker.addEventListener('change', async () => {
+          const f = imagePicker.files && imagePicker.files[0];
+          imagePicker.value = ''; // reset for next pick
+          if (!f) return;
+          sendImageFile(f);
+        });
+
+        // 支持直接粘贴图片（桌面浏览器）
+        function handlePaste(e) {
+          try {
+            const cd = e.clipboardData || window.clipboardData;
+            if (!cd) return;
+            const items = cd.items || [];
+            for (let i = 0; i < items.length; i++) {
+              const it = items[i];
+              if (it && it.kind === 'file' && it.type && it.type.startsWith('image/')) {
+                const blob = it.getAsFile && it.getAsFile();
+                if (blob) {
+                  e.preventDefault();
+                  const ext = (blob.type && blob.type.split('/')[1]) || 'png';
+                  const name = `pasted-${new Date().toISOString().replace(/[:.]/g, '-')}.${ext}`;
+                  // Safari 旧版可能没有 File 构造器，允许直接传 Blob
+                  const file = (window.File ? new File([blob], name, { type: blob.type || 'image/png' }) : Object.assign(blob, { name }));
+                  sendImageFile(file, name);
+                  return;
+                }
+              }
+            }
+            // 某些浏览器把图片放到 files 里
+            const files = cd.files || [];
+            if (files.length) {
+              for (let i = 0; i < files.length; i++) {
+                const f = files[i];
+                if (f && f.type && f.type.startsWith('image/')) {
+                  e.preventDefault();
+                  sendImageFile(f);
+                  return;
+                }
+              }
+            }
+          } catch (_) {}
+        }
+        // 仅在输入框内粘贴时处理
+        if (input) input.addEventListener('paste', handlePaste);
+      })();
 
 
       // 避免点击“发送”按钮时让输入框失焦，同时在触摸设备直接发送
@@ -1424,6 +1522,36 @@
         combined.set(iv, 0);
         combined.set(new Uint8Array(encrypted), iv.length);
         return btoa(String.fromCharCode(...combined));
+      }
+
+      // 加密二进制（返回 Uint8Array: iv + ciphertext）
+      async function encryptBytes(bytes) {
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const encrypted = await crypto.subtle.encrypt(
+          { name: 'AES-GCM', iv },
+          encryptionKey,
+          bytes
+        );
+        const combined = new Uint8Array(iv.length + encrypted.byteLength);
+        combined.set(iv, 0);
+        combined.set(new Uint8Array(encrypted), iv.length);
+        return combined;
+      }
+
+      // 解密二进制（输入 Uint8Array(iv + ciphertext)，返回 ArrayBuffer）
+      async function decryptBytes(combined) {
+        try {
+          const iv = combined.slice(0, 12);
+          const data = combined.slice(12);
+          const decrypted = await crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv },
+            encryptionKey,
+            data
+          );
+          return decrypted;
+        } catch (e) {
+          throw new Error('decrypt_failed');
+        }
       }
 
       // 解密消息
@@ -1973,6 +2101,70 @@
         }
         handleMessageReminder(who, plaintext, isMe);
       }
+
+      // 扩展：图片消息（先拦截处理，再回退到原逻辑）
+      (function extendHandleIncomingForImages(){
+        if (typeof handleIncomingMessage !== 'function') return;
+        const __origHandleIncomingMessage = handleIncomingMessage;
+        handleIncomingMessage = async function(m) {
+          try {
+            const who = m.name ? m.name : `#${m.from}`;
+            const isMe = m.from === clientId;
+            const plaintext = await decryptMessage(m.text);
+            const obj = tryParseJson(plaintext);
+            if (obj && obj.kind === 'image' && obj.url) {
+              // 先渲染占位文本
+              addMessage(who, obj.name ? `🖼 ${obj.name}` : '🖼 图片', isMe, m.color, m.id, { timestamp: m.at });
+              // 异步加载与解密图片
+              (async () => {
+                try {
+                  const msgDiv = messages.querySelector(`.msg[data-mid="${m.id}"]`);
+                  const bubble = msgDiv && msgDiv.querySelector('.bubble');
+                  if (!bubble) return;
+                  const ph = document.createElement('div');
+                  ph.textContent = '图片加载中…';
+                  ph.style.fontSize = '12px';
+                  ph.style.opacity = '0.7';
+                  ph.style.marginTop = '6px';
+                  bubble.appendChild(ph);
+                  const res = await fetch(obj.url, { cache: 'force-cache' });
+                  if (!res.ok) throw new Error('fetch_failed');
+                  const encBuf = new Uint8Array(await res.arrayBuffer());
+                  const dec = await decryptBytes(encBuf);
+                  const blob = new Blob([dec], { type: obj.mime || 'application/octet-stream' });
+                  const imgUrl = URL.createObjectURL(blob);
+                  const img = document.createElement('img');
+                  img.src = imgUrl;
+                  img.alt = obj.name || 'image';
+                  img.style.maxWidth = '70%';
+                  img.style.borderRadius = '8px';
+                  img.style.display = 'block';
+                  img.style.marginTop = '6px';
+                  img.loading = 'lazy';
+                  ph.replaceWith(img);
+                  img.addEventListener('load', () => { if (isNearBottom(200)) scrollToBottom(); });
+                } catch (_) {
+                  const msgDiv = messages.querySelector(`.msg[data-mid="${m.id}"]`);
+                  const bubble = msgDiv && msgDiv.querySelector('.bubble');
+                  if (!bubble) return;
+                  const fail = document.createElement('div');
+                  fail.textContent = '图片加载失败或已过期';
+                  fail.style.fontSize = '12px';
+                  fail.style.opacity = '0.7';
+                  fail.style.marginTop = '6px';
+                  bubble.appendChild(fail);
+                }
+              })();
+              if (m.id) {
+                messageTextById.set(m.id, obj.name ? `🖼 ${obj.name}` : '🖼 图片');
+                messageAuthorById.set(m.id, who);
+              }
+              return;
+            }
+          } catch {}
+          return __origHandleIncomingMessage(m);
+        };
+      })();
 
       function getReactionsFor(mid) {
         if (!reactions.has(mid)) reactions.set(mid, new Map());

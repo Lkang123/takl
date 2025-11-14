@@ -11,6 +11,14 @@ const HOST = '0.0.0.0'; // listen on all interfaces for LAN access
 
 // Resolve and restrict static file serving to the public directory
 const publicDir = path.join(__dirname, 'public');
+const uploadsDir = path.join(__dirname, 'uploads');
+
+function ensureUploadsDir() {
+  try { fs.mkdirSync(uploadsDir, { recursive: true }); } catch {}
+}
+function genFileId() {
+  return (Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10)).replace(/[^a-z0-9-]/gi, '').slice(0, 20);
+}
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -54,6 +62,90 @@ const server = http.createServer((req, res) => {
       roomsDetail
     };
     res.end(JSON.stringify(body));
+    return;
+  }
+
+  // 受限的文件上传与下载（仅存储密文）
+  // - 客户端需在本地加密（AES-GCM），上传的是密文；服务端仅作中转与存储
+  if (urlPath === '/upload' && req.method === 'POST') {
+    // 简单大小限制与写入 uploads 目录
+    const MAX_MB = parseInt(process.env.UPLOAD_MAX_MB || '8', 10) | 0;
+    const MAX_BYTES = Math.max(1, MAX_MB) * 1024 * 1024;
+    // 延迟创建上传目录（全局缓存）
+    ensureUploadsDir();
+
+    // 如果提供 content-length 且超限，直接拒绝
+    const declaredLen = parseInt(req.headers['content-length'] || '0', 10) || 0;
+    if (declaredLen > MAX_BYTES) {
+      res.statusCode = 413;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.end(JSON.stringify({ ok: false, error: 'too_large', maxMB: MAX_MB }));
+      return;
+    }
+
+    const id = genFileId();
+    const fpath = path.join(uploadsDir, id + '.bin');
+    const ws = fs.createWriteStream(fpath, { flags: 'wx' });
+    let bytes = 0;
+    let aborted = false;
+    req.on('data', (chunk) => {
+      bytes += chunk.length;
+      if (bytes > MAX_BYTES) {
+        aborted = true;
+        try { ws.destroy(); } catch {}
+        try { fs.unlink(fpath, () => {}); } catch {}
+        res.statusCode = 413;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.end(JSON.stringify({ ok: false, error: 'too_large', maxMB: MAX_MB }));
+        try { req.destroy(); } catch {}
+        return;
+      }
+      ws.write(chunk);
+    });
+    req.on('end', () => {
+      if (aborted) return;
+      ws.end(() => {
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.end(JSON.stringify({ ok: true, id, url: `/u/${id}` }));
+      });
+    });
+    req.on('error', () => {
+      try { ws.destroy(); } catch {}
+      try { fs.unlink(fpath, () => {}); } catch {}
+      res.statusCode = 500;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.end(JSON.stringify({ ok: false }));
+    });
+    return;
+  }
+  if (urlPath.startsWith('/u/')) {
+    const id = urlPath.slice(3).replace(/[^a-zA-Z0-9_-]/g, '');
+    if (!id || id.length < 6) {
+      res.statusCode = 404;
+      return res.end('Not found');
+    }
+    ensureUploadsDir();
+    const fpath = path.join(uploadsDir, id + '.bin');
+    fs.stat(fpath, (err, st) => {
+      if (err || !st || !st.isFile()) {
+        res.statusCode = 404;
+        return res.end('Not found');
+      }
+      res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('Content-Disposition', `inline; filename="${id}.bin"`);
+      // Align cache max-age with TTL hours (default 24h)
+      const ttlHours = parseInt(process.env.UPLOAD_TTL_HOURS || '24', 10) || 24;
+      const maxAge = Math.max(1, ttlHours) * 60 * 60;
+      res.setHeader('Cache-Control', `public, max-age=${maxAge}`);
+      try { res.setHeader('Last-Modified', st.mtime.toUTCString()); } catch {}
+      res.setHeader('Accept-Ranges', 'bytes');
+      const rs = fs.createReadStream(fpath);
+      rs.on('error', () => {
+        if (!res.headersSent) res.statusCode = 500;
+        try { res.end(); } catch {}
+      });
+      rs.pipe(res);
+    });
     return;
   }
   const resolvedPath = path.normalize(
@@ -531,9 +623,30 @@ const cleanupInterval = setInterval(() => {
   }
 }, 60 * 60 * 1000); // 每小时检查一次
 
+// 🔧 新增：定时清理过期上传（默认 24 小时）
+const uploadsCleanupInterval = setInterval(() => {
+  try {
+    ensureUploadsDir();
+    const ttlMs = parseInt(process.env.UPLOAD_TTL_HOURS || '24', 10) * 60 * 60 * 1000;
+    const now = Date.now();
+    const files = fs.readdirSync(uploadsDir);
+    let removed = 0;
+    for (const f of files) {
+      if (!f.endsWith('.bin')) continue;
+      const p = path.join(uploadsDir, f);
+      try {
+        const st = fs.statSync(p);
+        if (now - st.mtimeMs > ttlMs) { fs.unlinkSync(p); removed++; }
+      } catch {}
+    }
+    if (removed > 0) console.log(`[上传清理] 删除 ${removed} 个过期上传文件`);
+  } catch {}
+}, 60 * 60 * 1000);
+
 wss.on('close', () => {
   clearInterval(interval);
   clearInterval(cleanupInterval);
+  clearInterval(uploadsCleanupInterval);
 });
 
 function getLanAddresses() {
